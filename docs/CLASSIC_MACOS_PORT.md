@@ -1,161 +1,252 @@
-# Plan: rsync for Classic Mac OS (8.1) with resource-fork support
+# Plan: rsync for Classic Mac OS 8.1 with resource-fork support
 
-Status: **draft plan, nothing implemented yet.** Open questions are collected at the end.
-Toolchain: [Retro68](https://github.com/autc04/Retro68) (68k and/or PowerPC/CFM).
+Status: **plan, revision 2** (it now covers the owner's answers). Nothing is implemented yet.
+
+## 0. Decisions so far
+
+| Topic | Decision |
+|---|---|
+| Target | 68040 with 32 MB RAM, Mac OS 8.1, HFS disk. Built as a classic 68k app (not CFM-68K) |
+| Toolchain | **Retro68 only** for rsync itself (see §7 on why THINK C 5 won't work) |
+| Servers | (a) a modern Mac, or (b) Linux running **netatalk 4.x**. Optionally (c) any AFP server mounted on the classic Mac |
+| Resource forks | Required from the first version |
+| Encryption | Not needed for now. Options are in §8 |
+| Type/creator mapping, CR/LF translation | Options exist for both. Both are **off by default** |
+| Testing | **QEMU `q800`**, which emulates a Quadra 800 (68040) and boots Mac OS 7.1–8.1 |
+| Push to the classic Mac | Stretch goal, deferred |
 
 ## 1. Goals
 
-| # | Goal | Command run on… |
-|---|------|-----------------|
-| G1 | **Pull**: copy a source tree from a server to the classic Mac, keeping resource forks and Finder info, and copying only what changed | Classic Mac: `rsync -av --delete host::module/dir "Macintosh HD:Projects:dir"` |
-| G2 (stretch) | **Push**: a modern host sends a tree to the classic Mac | Modern host: `rsync -av --delete dir/ rsync://classicmac/module/dir/` |
-
-The app is a console app. You launch it, type a command line, and it runs that command.
-
-## 2. What is in this repository
-
-The repo holds two rsync implementations, and both have Apple's resource-fork support:
-
-| | `rsync/` (Apple rsync 2.6.9) | `openrsync/` (Apple's current `/usr/bin/rsync`) |
+| # | Goal | Example command, typed on the classic Mac |
 |---|---|---|
-| License | GPLv3 | ISC |
-| Wire protocol | 29 | 29 (works with any server that speaks ≥27) |
-| Resource forks (`-E`) | Through `copyfile()`. Each file with metadata gets an extra synthetic AppleDouble entry named `._name`, plus one extra byte per flist entry | The same wire behaviour, kept inside **`platform.c` hooks** (`platform_flist_modify`, `platform_flist_received`, `platform_move_file`, `platform_finish_transfer`, …) |
-| Process model | Forks the receiver from the generator, uses pipes between them and `select()`, and forks again for local copies and remote shells | The **receiver is one process** running a `poll()` loop over the uploader and downloader. The sender is one process too. It forks only to start a remote shell (ssh) or a local server, and in daemon mode |
-| File I/O | Path-based POSIX calls | `*at()` calls (`openat`, `fstatat`, `mkdirat`, `renameat`, `unlinkat`, …), `fts`, and `mmap` with a buffered-read fallback (`FT_BUFIO`) |
+| G1 | Pull a tree from a server to the classic Mac, keeping resource forks and Finder info, and copying only files that changed. `--delete` must work | `rsync -av --delete $(SRV)::src/MyApp "Macintosh HD:Projects:MyApp"` |
+| G1b | The same, from an AFP volume mounted in the Finder (no server software needed) | `rsync -av --delete "Server Vol:MyApp" "Macintosh HD:Projects:MyApp"` |
+| G2 (stretch) | A modern host pushes to the classic Mac | `rsync -av --delete dir/ rsync://classicmac/proj/dir/`, typed on the modern host |
 
-### Recommendation: base the port on `openrsync/`
+## 2. Base code: `openrsync/` (Apple's current rsync), not `rsync/` (2.6.9)
 
-1. **No fork in the main pull path.** As a client of an rsync daemon, openrsync connects a socket and runs `rsync_receiver()` in the same process. Classic Mac OS has no `fork`, `exec` or pipes, so this removes the hardest part of porting 2.6.9.
-2. **Resource-fork support sits behind a hook layer.** We write `platform_classic.c`, which implements the same hooks with the File Manager instead of `copyfile()`. The wire format stays identical to what Apple's rsync sends with `-E`.
-3. **The `*at()` API matches HFS well.** A directory "fd" becomes a `(vRefNum, dirID)` pair, and `openat(dirfd, "name")` becomes `FSMakeFSSpec(vRefNum, dirID, name)`. This avoids the 255-character limit on HFS full paths.
-4. `mmap` already has a buffered fallback, so nothing has to change there.
-5. The ISC license makes it simple to ship a binary.
+The repo holds both. Both send resource forks the same way when `-E` is given:
 
-The fallback is to port 2.6.9. That means replacing its forks with Thread Manager threads, which costs more and carries more risk.
+* For each file `foo` that has metadata, the sender adds an extra AppleDouble v2 entry named `._foo` to the file list.
+* Each file-list entry carries one extra byte that says whether it is a synthetic `._` entry.
 
-## 3. Architecture of the port
+openrsync is the better base for four reasons:
+
+* **Pulling needs no `fork`.** As a daemon client it runs the receiver as one process: a `poll()` loop over the uploader and downloader (`receiver.c`). Rsync 2.6.9 forks the generator and receiver on every transfer.
+* **The resource-fork code sits behind small hooks.** These are `platform_flist_modify`, `platform_flist_received`, `platform_move_file` and `platform_finish_transfer` in `platform.c`. We write a `platform_classic.c` with the same hooks, and the wire format stays the same.
+* **Its file calls take a directory handle.** Calls like `openat`, `fstatat` and `mkdirat` map directly to HFS `(vRefNum, dirID)` pairs, which avoids the 255-character limit on HFS full paths.
+* **It already reads files without `mmap`.** The `FT_BUFIO` fallback in `fmap.c` does buffered reads. The license is ISC.
+
+## 3. Server side: where resource forks live, and how they get onto the wire
+
+The owner didn't know where netatalk 4 keeps resource forks. Here is what the documentation and reports say:
+
+* netatalk 4's `afp.conf` option `ea` defaults to auto. It tries `sys` (filesystem extended attributes) first and falls back to `ad` (AppleDouble v2 files in `.AppleDouble/` folders) if the filesystem has no xattrs.
+* With `ea = sys`, the Finder info, dates and AFP metadata go in the xattr `user.org.netatalk.Metadata`.
+* Reports disagree on where the resource fork goes with `ea = sys`. Some say a Mac-OS-X-style `._foo` file next to the data file, others say an xattr (`org.netatalk.ResourceFork`, used on ZFS/Solaris and in newer builds).
+
+**Step one of Phase 0 is to check this on a real netatalk 4 volume.** The design below handles all three layouts, so the answer changes only which reader code runs.
+
+A stock rsync 3.x server can't send any of this. openrsync only speaks protocol 29, which has no xattr support, and even rsync 3's `-X` sends raw xattrs that would need netatalk-specific decoding on the Mac. So the plan uses **one wire format, Apple's `-E`**, and makes every server speak it:
+
+| Server | What runs on it | How forks are read |
+|---|---|---|
+| Modern Mac | Apple's stock `/usr/bin/rsync --daemon` (openrsync, or rsync 2.6.9 on macOS ≤12), run with `-E` | Native, through `copyfile()` |
+| Linux + netatalk 4 | **`rsync-netatalk`**: this repo's openrsync built for Linux, with a new `platform_netatalk.c` hook layer | Builds the `._foo` AppleDouble from `user.org.netatalk.Metadata` (Finder info, dates) plus the resource fork, taken from `._foo`, the `org.netatalk.ResourceFork` xattr, or `.AppleDouble/foo`, whichever exists |
+| Any AFP server (real Mac, netatalk, AppleShare) | Nothing. The volume is mounted on the classic Mac (G1b) | The File Manager on the Mac reads them directly |
+
+`rsync-netatalk` should be read-only toward the netatalk metadata at first. The stretch goal (push to the Mac) doesn't need it to write, and pulling from Linux never writes to the server.
+
+## 4. Client architecture (classic Mac)
 
 ```
 +---------------------------------------------------------------+
-|  Front end (RetroConsole window): command prompt, profiles,   |
-|  drag-a-folder-to-insert-path, progress, Cmd-. to abort       |
+|  Front end: RetroConsole window, "rsync>" prompt, $(VAR)      |
+|  substitution from a prefs file, saved profiles, drag a       |
+|  folder to insert its path, Cmd-. to abort                    |
 +---------------------------------------------------------------+
-|  openrsync core (mostly unchanged; #ifdef __MACOS_CLASSIC__)  |
-|  client.c receiver.c uploader.c downloader.c sender.c flist.c |
-+-------------------+--------------------+----------------------+
-| platform_classic.c| macposix/          | macnet/              |
-| AppleDouble <->   | *at() file API     | Open Transport TCP   |
-| rsrc fork,        | over File Manager, | as socket()/connect()|
-| FInfo/FXInfo,     | fts replacement,   | read/write/poll(),   |
-| type/creator map, | stat synthesis,    | yields to other apps |
-| CR/LF translation | name/charset map   | through WaitNextEvent|
-+-------------------+--------------------+----------------------+
-|        Retro68: newlib + Toolbox/OS (Multiversal or Universal |
-|        Interfaces), Thread Manager, Open Transport 1.3        |
+|  openrsync core (#ifdef __MACOS_CLASSIC__ where needed)       |
++------------------+------------------+-------------------------+
+| platform_classic | macposix/        | macnet/   +  mthread/   |
+| AppleDouble pack | *at() over the   | TCP via   |  Thread Mgr |
+| and unpack,      | File Manager,    | Open      |  for local  |
+| type/creator,    | fts, stat, names,| Transport |  mode, fake |
+| CR/LF option     | times            |           |  socketpair |
++------------------+------------------+-------------------------+
+| Retro68 (m68k-apple-macos): newlib, Toolbox, OT 1.3, Thread Mgr|
 +---------------------------------------------------------------+
 ```
 
-### 3.1 Transport
+### 4.1 Transport
 
-* **Classic Mac OS has no ssh.** So the single-colon form `host:dir` (remote shell) can't work as-is. The plan is to use the **rsync daemon protocol** over TCP: `host::module/path` or `rsync://host/module/path`. The server runs `rsync --daemon` with an `rsyncd.conf` module that points at the source tree. Authentication is the daemon's challenge/response, and the data itself is sent unencrypted. That is acceptable on a LAN.
-* **Reuse the single colon for local paths.** Remote shells are unsupported anyway, so on classic Mac OS a single-colon argument means an **HFS path** (`Macintosh HD:Projects:foo`), not `host:path`. This one-line change in `fargs`/argument parsing makes HFS paths behave naturally.
-* **Networking uses Open Transport 1.3** (it ships with Mac OS 8.1). The `macnet/` layer offers `socket/connect/read/write/close/poll` for TCP endpoints only.
-  * It uses OT synchronous, blocking mode with a sync-idle notifier. The notifier calls `WaitNextEvent`/`YieldToAnyThread`, so the machine stays responsive and Cmd-. can abort.
-  * `poll()` only needs to handle one or two network endpoints plus "always ready" local files. That makes it simple to write.
-  * MacTCP support is out of scope unless you need it on 68k machines without OT.
-* **If "AppleTalk server" means a mounted AFP volume,** see §3.6. That mode needs no networking code at all.
+* **No ssh on the Mac** (see §8). Remote paths use the rsync daemon protocol: `host::module/path` or `rsync://host/module/path`.
+* **A single colon means an HFS path.** Remote shells aren't supported, so on the Mac `Macintosh HD:Projects` is a local HFS path, not `host:path`.
+* **TCP comes from Open Transport 1.3**, which ships with 8.1. `macnet/` offers `socket/connect/read/write/close/poll` for TCP only.
+  * It runs synchronously, with a sync-idle callback that calls `WaitNextEvent`. That keeps the Finder alive and lets Cmd-. abort.
+  * 68k apps reach OT through static glue libraries from Apple's Universal Interfaces/MPW. Retro68's `ConvertObj` can convert `OpenTransport.o`.
+  * **Phase 0 checks this.** If the OT glue is a problem, the fallback is the MacTCP API, which OT supports for compatibility and which Multiversal Interfaces declares. Several Retro68 projects already use it.
+* **Local mode (G1b):** openrsync forks a local "server" connected by a `socketpair()`. On the Mac:
+  * That server runs in a **Thread Manager cooperative thread**, connected through an in-memory duplex buffer.
+  * `poll()` on that buffer yields to the other thread until data is ready.
+  * Thread stacks are at least 128 KB, because openrsync puts `PATH_MAX` buffers on the stack.
 
-### 3.2 File system layer (`macposix/`)
+### 4.2 File system (`macposix/`)
 
-This layer implements only the subset that openrsync uses:
+* **Directory handles.** A table maps each fd to `{vRefNum, dirID}` for a directory, or `{refNum, FSSpec}` for an open file. These calls are built on the File Manager:
 
-* **Directory handles.** A small table maps an `int` fd to `{vRefNum, dirID}` for directories, or to `{refNum, FSSpec}` for open files. `openat`, `fstatat`, `mkdirat`, `unlinkat` and `renameat` run on top of `PBGetCatInfo`, `PBDirCreate`, `FSpDelete`, `FSpRename` and `FSpCatMove`.
-* **Replacing an existing file.** HFS `rename` fails if the target exists. To replace a file, swap the contents with `FSpExchangeFiles`, then delete the temp file. That keeps the replacement atomic, and Finder info and the file ID stay attached to the old file.
+  | POSIX call | File Manager call |
+  |---|---|
+  | `openat` | `FSMakeFSSpec` + `FSpOpenDF` |
+  | `fstatat` | `PBGetCatInfo` |
+  | `mkdirat` | `PBDirCreate` |
+  | `unlinkat` | `FSpDelete` |
+  | `renameat` | `FSpRename` + `FSpCatMove` |
+* **Replacing a file.** HFS `rename` can't overwrite an existing file, so the finished temp file is swapped in with `FSpExchangeFiles` and the temp is then deleted. The swap is atomic, and the file keeps its ID, so aliases to it still work.
 * **`stat` synthesis:**
-  * Mode is 0644 for files and 0755 for folders, with an optional "locked" mapping to read-only.
+  * Mode is 0644 for files and 0755 for folders. A locked file maps to read-only.
   * uid and gid are 0, nlink is 1, and size is the data fork length.
   * mtime comes from `ioFlMdDat`.
-* **Times.**
-  * Mac dates count seconds since 1904 in **local time**. Convert them to and from the Unix epoch in UTC using the GMT delta from `ReadLocation()`.
-  * After a DST change every mtime would differ by an hour. Recommend `--modify-window`, or pin the GMT delta in prefs.
-* **Directory traversal** needs a minimal `fts_open/fts_read` replacement built on indexed `PBGetCatInfo`. This is only needed for the push/sender side and for `--delete` scanning.
-* **Unsupported file types** (symlinks, hard links, devices, ownership):
-  * Symlinks on the server are skipped with a warning, or, with `-L`, the files they point to are copied.
-  * Later we could map symlinks to Finder alias files.
-  * `chown` and `chmod` do nothing.
-* **Names:**
-  * Translate between UTF-8 on the wire (in NFC or NFD form) and MacRoman in HFS.
-  * HFS names allow at most **31 characters** and cannot contain `:`. Names that break these rules are mangled in a predictable way: shortened with a hash suffix, and `:` becomes `/`, which is the Finder's convention.
-  * The reverse mapping is kept in an invisible per-folder map file, so later runs and `--delete` behave correctly.
-  * HFS is case-insensitive. Two server files whose names differ only by case cause a reported conflict.
-* **File size.** Each fork is limited to 2 GB. That is not a concern for source trees.
+* **Times.** Mac dates count seconds since 1904 in *local* time.
+  * Convert them to and from UTC Unix time with the GMT delta from `ReadLocation()`.
+  * A DST change would shift every mtime by an hour and force a re-check. To avoid that, pin the offset in prefs (`gmt-offset`), or use `--modify-window=3601` for that one run.
+* **Directory traversal.** Write an `fts` replacement on top of indexed `PBGetCatInfo`. The `--delete` scan needs it, and so do local mode and push.
+* **What doesn't exist on HFS:**
+  * Symlinks: skip with a warning, or follow them with `-L` (`--copy-links`).
+  * Hard links, devices, ownership and permission bits: ignored.
 
-### 3.3 Resource forks and Finder metadata (`platform_classic.c`)
+### 4.3 File names
 
-When `-E` is used, Apple's rsync sends, for each file `foo` that has metadata, a synthetic **AppleDouble v2** file `._foo`, as `copyfile(COPYFILE_PACK)` produces it. openrsync orders `foo` before `._foo`, and applies `._foo` as metadata in `platform_move_file()` instead of storing it as a file.
+The wire carries UTF-8 names. HFS holds names of at most 31 bytes, in MacRoman, without `:`, and case-insensitive. Names are mapped with **a deterministic rule that needs no stored state**:
 
-On classic Mac OS:
+1. **Normalize** to NFC. macOS servers may send decomposed (NFD) names.
+2. **Convert to MacRoman** with a table compiled into the app. Text Encoding Converter isn't guaranteed on 8.1.
+3. **Translate `:` to `/`.** HFS allows `/` in names, and the Finder uses the same swap.
+4. **Mangle names that don't fit.** If a name has characters MacRoman lacks, or is longer than 31 bytes, it becomes `<prefix>#XXXX<.ext>`:
+   * `XXXX` is 4 hex digits of a hash of the full UTF-8 name.
+   * The extension is kept (up to 5 characters), so type/creator mapping still works.
+   * Example: `ThisIsAVeryLongSourceFileName_Helpers.c` → `ThisIsAVeryLongSourceF#3A9C.c`.
+   * netatalk shows the same file to classic AFP clients as `…#<CNID>`, which is a different name. The names on the server don't change, so this difference doesn't matter.
+5. **Case collisions.** If two names in a folder differ only by case, the first in rsync's sorted order keeps its name, the others are mangled as in rule 4, and a warning is printed.
 
-* **Unpack (receiving).** Parse the AppleDouble header and apply its entries:
+The rule is deterministic, so later runs and `--delete` find the same local names with no lookup table. The reverse mapping only matters when the Mac is the *sender* (the stretch goal). It can then be kept in an invisible `.rsync-names` file per folder.
+
+### 4.4 Resource forks and Finder info (`platform_classic.c`)
+
+* **Receiving (G1).** openrsync sends `foo` before its synthetic `._foo` (see `platform_flist_received`). When `._foo` finishes, `platform_move_file()` unpacks it instead of storing it:
   * Entry 2 (resource fork) is written with `FSpOpenRF`.
-  * Entry 9 (Finder info) is applied as the 16-byte FInfo with `FSpSetFInfo` and the 16-byte FXInfo with `PBSetCatInfo`. The extended-attribute area that `copyfile` adds after the Finder info is ignored.
+  * Entry 9 (Finder info) is applied: FInfo with `FSpSetFInfo`, and FXInfo through `PBSetCatInfo`. The xattr area that `copyfile` appends is skipped.
   * Entry 8 (dates) sets the creation date.
-  * Folders get their Finder info through `PBSetCatInfo`.
-* **Pack (sending, and as the basis for delta transfer).** Build an AppleDouble file from the local resource fork and Finder info. The layout should match `copyfile`'s byte for byte as far as possible. Then size and mtime match between runs, the quick check passes, and a `._foo` entry is not re-checked every time.
-  * **Risk:** if the server file has xattrs that HFS can't store (for example `com.apple.quarantine`), the sizes never match. Each run would then do a cheap but non-zero delta check of the metadata. Fixes: strip those xattrs on the server (`xattr -c`), or keep a small local cache of xattr blobs.
-* **Servers without Apple's `-E` extension** (Linux rsync 3.x, netatalk trees) need a compatibility mode, `--appledouble-files`. In this mode the client does not send `-E`, and treats ordinary `._foo` files that exist on the server as AppleDouble companions of `foo`. It uses the same unpack code with no wire extension. A variant for netatalk 2's `.AppleDouble/foo` layout can come later.
-* **Type and creator** for files that arrive **without** Finder info, such as a plain git checkout on Linux:
-  * Map them by file extension through **Internet Config** (`ICMapFilename`, built into 8.1).
-  * An override table in a prefs file can map, for example, `.c .h .r → TEXT/CWIE`.
+  * A folder's Finder info is set through `PBSetCatInfo`.
+  * If a local file has a fork or Finder info but the server sends no `._foo`, the fork and Finder info are cleared. This matches `FLAG_CLEAR_METADATA` in Apple's code.
+* **Packing.** This builds an AppleDouble from a local file's fork and Finder info. It is needed:
+  * as the basis for delta transfer of `._foo`,
+  * for the quick check, and
+  * on the sender side in local mode and push.
 
-### 3.4 Optional: line-ending translation for text files
+  Byte-for-byte equality with the server's AppleDouble isn't required. Both sides only need to compare the same `._foo` the same way:
+  * The local "size" of `._foo` is defined as the size the packer produces.
+  * The server's synthetic entries carry the base file's mtime.
+  * **Risk:** if the server packs extra data, such as Linux xattrs or macOS quarantine, the sizes never match. The `._foo` then gets a cheap re-check on every run. The fix is to make `rsync-netatalk` pack exactly the layout the Mac's packer produces, and on a Mac server to strip stray xattrs (`xattr -c`) or filter them out.
+* **Type and creator (option, off by default).** `--mac-types` assigns type and creator to files that arrive *without* Finder info:
+  * Mappings come from **Internet Config** (`ICMapFilename`, built into 8.1).
+  * Prefs can override them, for example `.c .h .r .p → TEXT/KAHL` (THINK C) or `TEXT/CWIE` (CodeWarrior).
+  * Files that arrived with Finder info are left alone.
+* **CR/LF translation (option, off by default).** `--mac-text[=exts]` translates line endings:
+  * Swapping LF and CR keeps the file the same length, so offsets, sizes and checksums still match. It is done in the read/write layer for the chosen files.
+  * The generator checksums the swapped-back bytes, so delta transfer keeps working.
+  * Files that contain CRLF are left alone, because converting them would change their length.
 
-MPW (and some other tools) need CR line endings. Swapping CR and LF **keeps the length of the file**. That means translation can happen in the macposix read/write layer for files chosen by extension or by type `TEXT`, and the rsync algorithm still works: block offsets, sizes and checksums all line up because the generator checksums the translated-back bytes. Files with CRLF line endings are left alone, because converting CRLF to CR would change their length. This feature is off by default, and turned on with `--mac-text=<ext-list>` or in prefs.
+### 4.5 Front end
 
-### 3.5 Front end
+* **RetroConsole window** with an `rsync>` prompt. A tokenizer handles quotes and backslashes and builds `argv`.
+* **`$(NAME)` variables** come from `rsync prefs` (a TEXT file in the Preferences folder). An example line is `SRV = 192.168.1.10`.
+* **Saved profiles:** `profile name = <command line>`, run with `rsync> run name`. Dropping a profile document on the app runs it.
+* **Dropping a folder** on the window inserts its HFS path, in quotes.
+* **Progress and abort.** `-v` and `--progress` print to the window. Cmd-. aborts cleanly and removes temp files. The exit code is shown.
+* **Memory.** The SIZE resource asks for 8 MB preferred and 4 MB minimum. openrsync keeps the whole file list in memory, at about 150 bytes plus path length per entry. With `-E` the entry count roughly doubles, so 20k files need about 6 MB.
 
-* A RetroConsole window shows a `rsync>` prompt. A small tokenizer handles quotes and backslashes and builds `argv`.
-* Variable substitution `$(NAME)` reads from a `rsync prefs` text file next to the app, or in the Preferences folder. Saved "profiles" let you re-run a sync in one step.
-* Dropping a folder or file on the window inserts its HFS path. Dropping a profile document on the app runs it.
-* Progress (`-v`, `--progress`) goes to the window. Cmd-. cancels cleanly, removing temp files.
-* The app partition is set through the SIZE resource, with 8–16 MB suggested. openrsync keeps the whole file list in memory, at about 150 bytes plus the path length per file, so 20k files take about 4–5 MB.
+## 5. Are delta ("partial") transfers worth it on a 68040?
 
-### 3.6 Local mode (both paths on the Mac, for example a mounted AFP volume)
+**Short answer: not over Ethernet, for source trees. Default to `--whole-file`, and allow delta mode with `--no-whole-file`.**
 
-openrsync runs a local copy by forking a "server" connected through a `socketpair`. On classic Mac OS that server runs instead in a **Thread Manager cooperative thread**, connected to the client through an in-memory duplex buffer (a fake `socketpair`). `poll()` treats the buffer as ready when it has data, and yields otherwise.
+What delta mode costs on the Mac, which is the receiver:
 
-The delta algorithm doesn't help much over AFP, because it has to read the whole file to checksum it. The real gain is skipping unchanged files by size and mtime, and `--delete`. That is cheap catalog work and much faster than copying in the Finder. Resource forks come straight from the File Manager on both sides, so no AppleDouble step is needed.
+* For each changed file, the receiver reads its existing copy and computes a rolling checksum plus an MD4 per block, then sends those to the server. The server does the expensive search.
+* The receiver then rebuilds the file from the old copy plus the literal bytes it receives.
+* It also costs an extra round trip per file.
 
-### 3.7 Stretch: push from a modern host (G2)
+Rough numbers (Phase 0 measures them):
 
-The classic Mac runs `rsync --daemon` on port 873 through an OT listener and serves **one connection at a time**, with no fork. It reads a minimal `rsyncd.conf` with modules mapped to HFS folders. The modern host then runs `rsync -av -E --delete dir/ rsync://classicmac/module/dir/`, with `-E` only when the host runs Apple's rsync. On the classic side the receiver code is the same as in G1. The extra work is the OT listener, the daemon greeting and authentication (`daemon.c` without fork, privilege dropping or chroot), and the sender-side fts/pack code that `--delete` and bidirectional use need.
+| | Throughput |
+|---|---|
+| MD4 on a 33–40 MHz 68040 | on the order of a few MB/s |
+| Open Transport on a Quadra's built-in Ethernet | a few hundred KB/s to about 1 MB/s |
+| LocalTalk (AFP over AppleTalk on serial ports) | about 20–30 KB/s |
 
-## 4. Phases
+So:
+
+* **Most of the gain comes from the quick check, not delta.** rsync skips every file whose size and mtime match, and that works the same with `--whole-file`. Your case is a large tree where few files change, and that is exactly what the quick check covers.
+* **Source files are small** (KB to tens of KB). Over Ethernet a whole-file copy takes milliseconds. Delta mode would spend about the same time on reading, checksums and the round trip, and save almost nothing.
+* **Delta pays off for large files that change a little** (for example a multi-MB `.rsrc`, a project file or a library) over a **slow link** (LocalTalk, or a WAN). There, network time dominates and delta can be 10–100× faster.
+* **Resource forks** go through the same logic. A small edit in a big fork is a good case for delta over a slow link.
+* **In local mode (G1b) delta never helps.** The sender has to read the whole file over AFP to checksum it anyway. openrsync already defaults to `--whole-file` for local copies.
+
+## 6. Testing on QEMU `q800`
+
+* **Emulator:** QEMU `-M q800` (Quadra 800, 68040) boots Mac OS 7.1–8.1. That support was merged upstream in 2023, so use QEMU 8.2 or newer. Its SONIC Ethernet works with tap or bridged networking.
+* **Needs from the owner:**
+  * a Quadra 800 ROM image,
+  * Mac OS 8.1 install media, which isn't freely licensed, so it can't go into CI from this repo.
+  * Both are expected at a local path or as CI secrets.
+* **Headless automation:**
+  1. The test build of the app autoruns from Startup Items.
+  2. It reads a script file from a second HFS disk image, runs the syncs, writes a manifest (names, data and fork hashes, type/creator, dates) to that disk, and shuts down.
+  3. Linux reads the disk back with `hfsutils` (`hcopy -m` keeps forks) and compares the manifest with the fixtures on the server.
+* **Server fixtures**, on a netatalk 4 container and a Mac (or the `rsync-netatalk` daemon). Each test tree includes:
+  * files with only a resource fork, and files with both forks
+  * custom type/creator and folder Finder info
+  * long, non-ASCII, `:`-containing and case-colliding names
+  * empty, large, deleted and renamed files
+* **Fast tests without the emulator:**
+  * `platform_classic.c` pack/unpack and the name mapping are plain C, so they are unit-tested on Linux.
+  * `macposix` is tested against a small fake File Manager on Linux.
+  * openrsync's existing regression tests keep running on Linux.
+
+## 7. Why THINK C 5 won't work for rsync itself
+
+* openrsync is C99. It uses `//` comments, declarations mixed with code, `stdint.h`, `<stdbool.h>`, variadic macros and designated initializers.
+* It needs **64-bit integers** for file sizes and offsets, because the protocol sends int64 values. THINK C 5 (1991) has none of this.
+* The 2.6.9 code also needs `long long`. A THINK C port would mean rewriting large parts of the code.
+* Retro68's GCC builds a normal 68k application that runs alongside THINK C on the target. THINK C stays the compiler for *your* project, and `--mac-types` can stamp synced files as `TEXT/KAHL` so they open in it.
+
+## 8. What encryption would involve
+
+* **Today:** the daemon's password check is challenge/response, so the password never crosses the wire in clear. The file data and names do.
+* **Option A: TLS (recommended if needed).** This is the `rsync-ssl` / `rsync://` over TLS approach.
+  * The server wraps the daemon in `stunnel` or HAProxy, or uses rsync 3.2's TLS support.
+  * The Mac gets a small TLS 1.2 client. BearSSL is the best fit: small, no `malloc`, portable C.
+  * The handshake (ECDHE plus RSA or ECDSA verification) takes a few seconds on a 68040. Bulk ChaCha20-Poly1305 or AES-GCM runs at roughly 0.5–2 MB/s, which is close to Ethernet speed.
+  * Effort is about 2–3 weeks, mostly porting and testing, plus storing a CA or pinned key in prefs.
+* **Option B: ssh** (a libssh2 or dropbear client port). This allows plain `host:path` with no daemon on the server, but it is several times the work of TLS and much heavier on a 68040.
+* **Option C: keep the network trusted.** Use a LAN segment, or a VPN or WireGuard tunnel ending on a router or Pi in front of the Mac. This needs no code.
+
+## 9. Phases (revised)
 
 | Phase | Work | Exit criterion |
 |---|---|---|
-| 0. Toolchain and test bed | Build Retro68 in Docker/CI (68k and/or PPC). Set up an emulator: Basilisk II for 68k, or SheepShaver/QEMU-ppc for PPC with 8.1, OT and a shared network. Write a "hello OT" TCP client | Hello-world connects to a Linux host from the emulator |
-| 1. Make openrsync portable on Linux | Put all filesystem, process and network calls behind a thin `compat_*` interface. Add `__MACOS_CLASSIC__` guards. Make the daemon-client pull path free of fork, and the local mode able to use threads. Run the existing regression tests on Linux | Linux build is green, with no behaviour change |
-| 2. `macposix` and `macnet` | File Manager backend, OT backend, `poll()`, time and name mapping. A unit-test app runs in the emulator | Can list, create, rename and delete a tree, and do TCP echo |
-| 3. **MVP: pull, data forks only** | `rsync -rt --delete host::mod/dir HFS:path` against an rsync 3.x and Apple rsync daemon | Second run transfers 0 bytes, and an edited file is delta-transferred |
-| 4. Resource forks | `platform_classic.c` unpack, `-E` against Apple rsync, `--appledouble-files` against Linux, Internet Config type/creator | A CodeWarrior project and `.rsrc` files arrive intact and open/build |
-| 5. Front end and polish | Prompt, profiles, `$(VAR)`, drag and drop, Cmd-., progress, optional CR/LF translation | Your use case end to end |
-| 6. Local/AFP mode | Thread-based local server and fake socketpair | Sync from a mounted AppleShare volume to a local disk |
-| 7. Stretch: daemon on classic | OT listener, `daemon.c` without fork, sender-side pack | A modern host pushes to the classic Mac |
+| **0. Groundwork** | Build Retro68 (m68k) in Docker and CI. Bring up QEMU q800 with 8.1, OT and networking. Write a hello-world TCP client using OT (or MacTCP as fallback). Set up a netatalk 4 test server and **find out where it stores forks** (§3). Measure MD4 speed and TCP throughput on the emulator | Hello-world connects from the emulator. Fork storage is documented |
+| **1. Prepare openrsync** | Put file, process and network calls behind `compat_*`. Add `__MACOS_CLASSIC__` guards. Make the daemon-client pull path free of fork. Abstract local mode over "thread or fork". Keep the Linux and macOS builds green | Existing tests pass |
+| **2. `rsync-netatalk` server** | `platform_netatalk.c`: build `._foo` AppleDouble from netatalk storage, and reuse Apple's `-E` code path. Test against Apple's macOS rsync running as the client | A macOS `rsync -E` pull from the Linux daemon recreates forks and Finder info exactly |
+| **3. Mac layers** | `macposix`, `macnet`, name mapping, time conversion, an `fts` replacement. Unit-test app in the emulator | Can list, create, swap and delete a tree, and do TCP echo |
+| **4. MVP: pull with forks (G1)** | `platform_classic.c` unpack and pack, `--delete`, `--whole-file` by default. Test against a macOS daemon and the `rsync-netatalk` daemon | Fixture tree matches exactly. A second run transfers 0 files. Editing one fork transfers only that file |
+| **5. Front end** | Prompt, `$(VAR)`, profiles, drag and drop, Cmd-., progress. `--mac-types` and `--mac-text` options | Your workflow works end to end on QEMU, then on the real 68040 |
+| **6. Local/AFP mode (G1b)** | Thread Manager server and fake socketpair | Sync from a mounted netatalk or AppleShare volume |
+| 7. Stretch: push (G2) | OT listener, `daemon.c` without fork (one connection at a time), sender-side traversal, `.rsync-names` | A modern host pushes a tree to the Mac |
+| 8. Optional: TLS | BearSSL client (§8) | `rsync-ssl`-style transfer works |
 
-Testing approach:
+## 10. Remaining risks
 
-* A Linux "golden" server holds fixture trees with long, non-ASCII, case-colliding names, resource-fork-only files, and empty and large files.
-* A script in the emulator runs syncs and dumps a manifest of names, data and resource fork hashes, type/creator, and dates. The script compares that manifest with the server.
-
-## 5. Risks
-
-* **Performance on 68k:** MD4 and rolling checksums on a 25–40 MHz 68030/040 cost more than an LC's Ethernet throughput. Default to `--whole-file` on slow CPUs, and keep delta for big files that change little.
-* **Retro68 headers:** Open Transport may need Apple's Universal Interfaces rather than Multiversal Interfaces. Check this in phase 0.
-* **Quick-check stability of `._` entries** (see §3.3) and **DST shifts in mtimes** (see §3.2).
-* **Stack and heap:** the openrsync code puts `PATH_MAX` buffers on the stack. Give the threads stacks of at least 64 KB, and keep an eye on heap fragmentation in a fixed partition.
-
-## 6. Open questions
-
-See the list in the conversation, or the PR description.
+* **OT glue libraries for 68k under Retro68** (the MacTCP fallback is identified).
+* **netatalk 4 fork storage** varies by version and `ea` mode. The reader handles all three layouts, but this must be checked in Phase 0.
+* **Stability of the `._foo` quick check** (§4.4), and **DST shifts** in mtimes (§4.2).
+* **Heap fragmentation** in a fixed partition on very large trees. Mitigations: grow the SIZE resource, and later borrow memory with `TempNewHandle`.
