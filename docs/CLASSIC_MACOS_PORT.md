@@ -1,6 +1,6 @@
 # Plan: rsync for Classic Mac OS 8.1 with resource-fork support
 
-Status: **plan, revision 4** (netatalk findings from the owner's experiments). Nothing is implemented yet.
+Status: **plan, revision 5** (netatalk behaviour measured on the owner's server). Nothing is implemented yet.
 
 ## 0. Decisions so far
 
@@ -8,7 +8,7 @@ Status: **plan, revision 4** (netatalk findings from the owner's experiments). N
 |---|---|
 | Target | 68040 with 32 MB RAM, Mac OS 8.1, HFS disk. Built as a classic 68k app (not CFM-68K) |
 | Toolchain | **Retro68 only** for rsync itself (see §7 on why THINK C 5 won't work) |
-| Servers | (a) a modern Mac, or (b) Linux running **netatalk 4.x** (owner's: afpd 4.5.0dev, a mixed volume: new files `ea = sys` with `._name` sidecars plus a metadata xattr, older files with `.AppleDouble/` v2 sidecars), using a stock rsync daemon or `rsync-netatalk` (§3.3). Optionally (c) any AFP server mounted on the classic Mac |
+| Servers | (a) a modern Mac, or (b) Linux running **netatalk 4.x** (owner's: afpd 4.5.0dev, `ea = sys`, `._name` sidecars that also carry Finder info), using a **stock rsync daemon** (§3.3). Optionally (c) any AFP server mounted on the classic Mac |
 | Resource forks | Required from the first version |
 | Encryption | Not needed for now. Options are in §8 |
 | Type/creator mapping, CR/LF translation | Options exist for both. Both are **off by default** |
@@ -39,41 +39,43 @@ openrsync is the better base for four reasons:
 
 ## 3. Server side: where resource forks live, and how they get onto the wire
 
-### 3.1 What the owner's netatalk server does (afpd 4.5.0dev)
+### 3.1 What the owner's netatalk server does (afpd 4.5.0dev), as measured
 
-The owner ran two experiments on the server.
-
-**An older file** (resource fork only, no data fork), which looks like it came from netatalk 2 or a volume that once used `ea = ad`:
+The owner copied Civilization 1.1.2 from a Mac OS 8.1 client over AppleShare over IP into `foo/` (Get Info: resource fork 687,608 bytes, no data fork), then examined the server:
 
 ```
-'Civilization™ 1.1.2'                  0 bytes       <- data fork
-'.AppleDouble/Civilization™ 1.1.2'    688339 bytes  <- AppleDouble v2 sidecar
+foo/Civilization™ 1.1.2      0 bytes       mtime = the Mac's mod date (2026-06-02 17:10:30)
+foo/._Civilization™ 1.1.2    687690 bytes  mtime = server time of last fork/metadata write
+  + xattr user.org.netatalk.Metadata on the data file
 ```
 
-**A new copy** of the same app, made from a Mac OS 8.1 client over AppleShare over IP into `foo/`:
+`xxd` of the `._` file:
 
 ```
-foo/Civilization™ 1.1.2      0 bytes       mtime 2026-06-02 17:10:30  (= the Mac's mod date)
-foo/._Civilization™ 1.1.2    687690 bytes  mtime 2026-11-02 15:08:02  (= when the copy was made)
+0005 1607  0002 0000  "Netatalk        "  0002          magic, v2, filler, 2 entries
+0000 0009  0000 0032  0000 0020                         Finder info  @50, 32 bytes
+0000 0002  0000 0052  000a 7df8                         resource fork @82, 687,608 bytes
+@50: 4150504c 43764d4d 2100 ffff ffff 0000 ...          'APPL' 'CvMM' flags 0x2100, location -1,-1
+@82: 0000 0100 000a 3bce 000a 3ace ...                  start of the resource fork (its own header)
 ```
 
-Opening the file through AFP changed **only the data file's ctime**. That is consistent with afpd rewriting its metadata xattr. Neither mtime changed, and neither size changed.
+Findings:
 
-What this shows:
-
-1. **Files are written in `ea = sys` layout now.**
-   * Finder info, dates and CNID go in the xattr `user.org.netatalk.Metadata`.
-   * The resource fork goes in a Mac-OS-X-style `._name` file next to the data file. netatalk's `adouble.h` gives its layout:
-     * 26-byte header, filler `"Mac OS X"`
-     * 2 entries: Finder info (9, 32 bytes at offset 50) and resource fork (2, at offset 82)
-     * so the size is 82 plus the fork length
-
-   **The volume is mixed:** older files still have `.AppleDouble/` v2 sidecars. Those have a fixed 741-byte header (`AD_DATASZ2`) with the 13 netatalk entries (name, comment, dates, Finder info, short name, AFP info, ProDOS info, DID, private dev/ino/syn/CNID), then the fork. **The client must handle both layouts**, and a folder can mix them.
-2. **The sizes don't quite agree.** The two layouts imply forks of 687,598 bytes (old) and 687,608 bytes (new). The two copies may simply differ. Otherwise one of the header-size assumptions is wrong. *Check with an `xxd` of both headers and the Mac's Get Info.*
-3. **The data file's mtime is the Mac's real modification date**, which AFP sets. The `._` mtime is the server's write time.
-4. **Opening a file doesn't touch either mtime**, so read-only use on the Mac won't cause needless re-syncs.
-5. **Open question: does Finder info (type/creator) reach the `._` file?** In `ea = sys` mode netatalk's authoritative copy is the xattr. A stock rsync daemon (protocol 29) **can't send xattrs**. If netatalk also writes the 32 Finder-info bytes into the `._` header, a stock daemon is enough. If that area is zeroed, a server-side helper is needed (§3.3). *Check with `xxd -s 50 -l 32 "foo/._Civilization™ 1.1.2"` (should show `APPL` plus the creator code) and `getfattr -d -m - -e hex "foo/Civilization™ 1.1.2"`.*
-6. **Open question: does afpd bump the data file's mtime when a Mac edits only the resource fork?** HFS and AFP have a single modification date, so it ought to. *Check: open a file on the share in ResEdit, change a resource without changing the fork's length, save, and `stat` both files.* The answer decides the mtime rule in §3.2.
+1. **Layout.** The volume stores files in `ea = sys` layout.
+   * The resource fork is in `._name` next to the data file. The file is 82 bytes of header plus the fork: 82 + 687,608 = 687,690, which matches.
+   * The filler is `"Netatalk        "`, *not* `"Mac OS X"`. So the parser identifies these files by their entry table, not by the filler.
+2. **Finder info is copied into the `._` header.** The 32 bytes at offset 50 (`APPL`/`CvMM`, flags, location) are identical to entry 9 in the `user.org.netatalk.Metadata` xattr.
+   * **A stock rsync daemon therefore carries type, creator and Finder flags.** `rsync-netatalk` is not needed for files that have a `._`.
+   * The xattr also holds the comment (4), dates (8), AFP info (14) and netatalk's private dev/ino/sync/CNID entries. These are not needed on the Mac. Creation date is the only loss (see 5).
+3. **Mtime behaviour:**
+   * Opening a file over AFP changes only the data file's **ctime**. No mtime or size changes.
+   * **Editing only the resource fork (same length) bumps the `._` mtime but *not* the data file's mtime.** So the client can't rely on the data mtime to catch fork changes. It uses the `max()` rule in §3.2.
+   * The data file's mtime is the Mac's own modification date, which AFP sets. It stayed in UTC across the Mac's DST change.
+4. **Older `.AppleDouble/` v2 sidecars** (741-byte header) seen earlier may be corrupt or leftovers. The client still parses them, at low priority. The parser is generic over the entry table, so it costs almost nothing extra.
+5. **Still to check:**
+   * *(a)* Does a file **with no resource fork** (a TEXT file with type/creator only) get a `._` file at all? If not, its type and creator exist only in the xattr, and a stock daemon can't send them. **Fallback:** `--mac-types` extension mapping on the client, which is usually fine for source files. If exact type/creator matters for such files, build `rsync-netatalk`.
+   * *(b)* Does a **Finder-info-only change** (label, type/creator edit, move icon) rewrite the `._` header and bump its mtime?
+   * *(c)* The creation date is only in the xattr, so it isn't preserved. The HFS creation date is set to the modification date.
 
 ### 3.2 The client's `--netatalk` mode
 
@@ -83,35 +85,36 @@ The mapping happens in `platform_flist_received()`, right after the file list ar
 
 | Entry on the wire | What the client does |
 |---|---|
-| `dir/._foo`, filler `"Mac OS X"` (current `ea = sys` files) | Becomes the synthetic metadata entry for `dir/foo`. After transfer it is unpacked by the same code as Apple's `-E` (§4.4): entry 2 becomes the resource fork, entry 9 the Finder info (if not all zero) |
-| `dir/.AppleDouble/foo`, filler `"Netatalk        "` (older files) | The same, plus entry 8 (creation date). Entries 3, 4, 11 and 13–19 are ignored |
-| `dir/.AppleDouble/` (folder) | Hidden from the local view. Nothing is created on HFS |
-| `dir/.AppleDouble/.Parent` | The folder's Finder info (window position, view, flags) |
-| Both `._foo` and `.AppleDouble/foo` exist | The newer one wins, by mtime, and a warning is printed (a leftover from conversion) |
+| `dir/._foo` (AppleDouble, filler "Netatalk" or "Mac OS X") | Becomes the metadata entry for `dir/foo`. After transfer it is unpacked by the same code as Apple's `-E` (§4.4): entry 2 becomes the resource fork, entry 9 the Finder info. If entry 9 is longer than 32 bytes, as in macOS-written files with an `ATTR` xattr block, the extra is ignored. Location `-1,-1` means "let the Finder place it" |
+| `dir/.AppleDouble/foo` (old v2) | The same, plus entry 8 (dates). Entries 3, 4, 11 and 13–19 are ignored |
+| `dir/.AppleDouble/` and `.AppleDouble/.Parent` | Hidden from the local view. `.Parent` supplies folder Finder info |
+| Both `._foo` and `.AppleDouble/foo` exist | The newer one wins, by mtime, and a warning is printed |
 | `.AppleDB/`, `.AppleDesktop/`, `Network Trash Folder`, `Temporary Items`, `.DS_Store`, `:2eDS_Store` | Excluded by a built-in filter list |
+| `foo` with no metadata entry | Plain data file. Type and creator come from `--mac-types`, if given |
 
 **How the quick check stays stable** (unchanged files must not be re-sent):
 
-* **Size.** The local "size" of the metadata entry is computed from the layout the server used, without packing anything:
-  * for a `._foo` entry, 82 plus the local resource fork length;
-  * for an `.AppleDouble/foo` entry, 741 plus the local resource fork length.
+* **Size.** The local "size" of a `._foo` entry is 82 plus the local resource fork length. For a `.AppleDouble/foo` entry it is 741 plus that length. Nothing is packed to work this out. The first transfer checks that the header the server sent has the expected size. If not, the actual size is used.
+* **Modification time.** The server's two mtimes are folded into the one HFS modification date. Fact 3 shows that a fork edit bumps only the sidecar, so:
+  1. On the client only, both list entries for a file get **`max(data mtime, sidecar mtime)`**.
+  2. That value is written as the file's HFS modification date.
+  3. On the next run, a change on either side changes the max. Both entries are then re-checked, and with `--whole-file` both are re-sent, which is cheap.
 
-  Both header sizes are checked on the first transfer of each file. If the header the server sent is a different size, its actual size is used and a debug note is logged.
-* **Modification time.** HFS keeps *one* modification date, but the server has two. The plan is to **keep the Mac's real modification date**, which is the data file's mtime (fact 3), on the HFS file. Then, on the client only, the metadata entry's mtime is rewritten to equal the data file's, so both entries compare against the one HFS date.
-  * This assumes the answer to question 6 is "yes". A fork-only edit bumps the data mtime, the change is caught, and the size check catches most other cases anyway.
-  * If the answer is "no", both entries use `max(data mtime, metadata mtime)` instead. Fork-only edits are then always caught, but the Mac shows the server's write time as the modification date.
-* **Basis for delta mode.** The local fork is packed in the server's layout, with the private entries zeroed. That only matters inside changed blocks.
+  *Trade-off:* the Mac shows the server's sidecar write time as the modification date, when that is newer than the data mtime. For files saved from a Mac over AFP the two are within seconds of each other. For files only copied, it is the copy time.
+  * `--netatalk-dates=data` keeps the true data-file date on HFS instead. The client then records each sidecar's server mtime in an invisible per-tree state file (`.rsync-netatalk`). If that file is lost, the cost is one full re-check.
+  * Recommendation: ship `max()` first, and add `data` later if the dates matter to you.
+* **Basis for delta mode.** The local fork and Finder info are packed in netatalk's 82-byte `._` layout, so the basis matches the server byte for byte except where it really changed.
 * **`--delete`:**
-  * When the metadata entry disappears on the server, the client clears the local fork and Finder info.
+  * When the sidecar disappears on the server, the client clears the local fork and Finder info.
   * When the data file disappears, the client deletes the HFS file, both forks together.
-  * A metadata entry with no data file (an orphaned `._foo`) is ignored with a warning.
+  * A `._foo` with no `foo` (orphaned) is ignored with a warning.
 
 ### 3.3 Server options
 
 | Server | What runs on it | How forks reach the Mac |
 |---|---|---|
-| **Linux + netatalk (owner's setup), if `._` files carry Finder info** (fact 5 = yes) | **Stock `rsync --daemon`** (3.x) with a module pointing at the share: `read only = yes`, `uid`/`gid` = the share owner | Client `--netatalk` (§3.2) |
-| Linux + netatalk, if Finder info lives only in the xattr (fact 5 = no) | **`rsync-netatalk`**: this repo's openrsync built for Linux, with a `platform_netatalk.c` that reads `user.org.netatalk.Metadata` plus `._foo` or `.AppleDouble/foo`. It sends Apple's `-E` format, carrying fork, Finder info and dates. Roughly 1–2 weeks of extra work. (The alternative, adding rsync 3's protocol-30 xattr transfer to the client and decoding netatalk's xattr on the Mac, is more work and is less contained) | `-E` |
+| **Linux + netatalk (owner's setup)** | **Stock `rsync --daemon` (3.x)**, with a module on the share: `read only = yes`, `uid`/`gid` = the share owner | Client `--netatalk` (§3.2) |
+| Same, if fork-less files need exact type/creator (§3.1, 5a) | Optional **`rsync-netatalk`**: this repo's openrsync built for Linux, with a `platform_netatalk.c` that reads `user.org.netatalk.Metadata` and sends Apple's `-E` format. About 1–2 weeks. **Deferred** until 5a shows it's needed | `-E` |
 | Modern Mac | Apple's stock `rsync --daemon`, run with `-E` | Apple `-E` format (§4.4) |
 | Any AFP server, mounted on the classic Mac | Nothing | The File Manager on the Mac reads forks directly (G1b) |
 
@@ -127,7 +130,6 @@ A server-side example (`/etc/rsyncd.conf` on the netatalk host):
 ```
 
 On the Mac you then type: `rsync -av --netatalk --delete $(SRV)::src/MyApp "Macintosh HD:Projects:MyApp"`
-(or `-E` instead of `--netatalk` against `rsync-netatalk` or a Mac).
 
 ## 4. Client architecture (classic Mac)
 
@@ -180,7 +182,10 @@ On the Mac you then type: `rsync -av --netatalk --delete $(SRV)::src/MyApp "Maci
   * mtime comes from `ioFlMdDat`.
 * **Times.** Mac dates count seconds since 1904 in *local* time.
   * Convert them to and from UTC Unix time with the GMT delta from `ReadLocation()`.
-  * A DST change would shift every mtime by an hour and force a re-check. To avoid that, pin the offset in prefs (`gmt-offset`), or use `--modify-window=3601` for that one run.
+  * **DST.** HFS dates are local time, so when the Mac's clock moves on or off DST, every local mtime appears to shift by exactly one hour. (The owner's Mac just did this. The server's UTC mtimes did not move.) To avoid a full re-transfer twice a year:
+    * By default the client treats an mtime difference of **exactly ±3600 s, with equal size**, as unchanged. Pass `--strict-times` to turn this off.
+    * When a file is written, the client converts using the *current* `MachineLocation` offset, including the `dlsDelta` flag.
+    * A `gmt-offset` in prefs can pin a fixed offset for anyone who keeps the Mac on standard time all year.
 * **Directory traversal.** Write an `fts` replacement on top of indexed `PBGetCatInfo`. The `--delete` scan needs it, and so do local mode and push.
 * **What doesn't exist on HFS:**
   * Symlinks: skip with a warning, or follow them with `-L` (`--copy-links`).
@@ -306,9 +311,9 @@ So:
 
 | Phase | Work | Exit criterion |
 |---|---|---|
-| **0. Groundwork** | Build Retro68 (m68k) in Docker and CI. Bring up QEMU q800 with 8.1, OT and networking. Write a hello-world TCP client using OT (or MacTCP as fallback). Set up a netatalk 4 test server that mirrors the owner's mixed volume, and answer questions 5 and 6 from §3.1. Measure MD4 speed and TCP throughput on the emulator | Hello-world connects from the emulator. Fork storage is documented |
+| **0. Groundwork** | Build Retro68 (m68k) in Docker and CI. Bring up QEMU q800 with 8.1, OT and networking. Write a hello-world TCP client using OT (or MacTCP as fallback). Set up a netatalk 4 test server that mirrors the owner's, and answer the open checks in §3.1 item 5. Measure MD4 speed and TCP throughput on the emulator | Hello-world connects from the emulator. Fork storage is documented |
 | **1. Prepare openrsync** | Put file, process and network calls behind `compat_*`. Add `__MACOS_CLASSIC__` guards. Make the daemon-client pull path free of fork. Abstract local mode over "thread or fork". Keep the Linux and macOS builds green | Existing tests pass |
-| **2. Netatalk mapping (Linux-testable)** | `--netatalk` file-list rewriting, a v2 and "Mac OS X" AppleDouble parser/packer, and the size and mtime rules from §3.2. Test on Linux with a mock `platform_classic` that writes forks as `._` files, against a stock rsync daemon serving a copy of the owner's mixed netatalk share. Build `rsync-netatalk` too if question 5 in §3.1 is "no" | Second run against a fixed tree transfers 0 files. Fork and Finder-info bytes round-trip exactly |
+| **2. Netatalk mapping (Linux-testable)** | `--netatalk` file-list rewriting, a v2 and "Mac OS X" AppleDouble parser/packer, and the size and mtime rules from §3.2. Test on Linux with a mock `platform_classic` that writes forks as `._` files, against a stock rsync daemon serving a copy of the owner's netatalk share.  | Second run against a fixed tree transfers 0 files. Fork and Finder-info bytes round-trip exactly |
 | **3. Mac layers** | `macposix`, `macnet`, name mapping, time conversion, an `fts` replacement. Unit-test app in the emulator | Can list, create, swap and delete a tree, and do TCP echo |
 | **4. MVP: pull with forks (G1)** | `platform_classic.c` unpack and pack, `--delete`, `--whole-file` by default. Test against the netatalk host (`--netatalk` or `rsync-netatalk`) and a macOS daemon (`-E`) | Fixture tree matches exactly. A second run transfers 0 files. Editing one fork transfers only that file |
 | **5. Front end** | Prompt, `$(VAR)`, profiles, drag and drop, Cmd-., progress. `--mac-types` and `--mac-text` options | Your workflow works end to end on QEMU, then on the real 68040 |
@@ -319,8 +324,8 @@ So:
 ## 10. Remaining risks
 
 * **OT glue libraries for 68k under Retro68** (the MacTCP fallback is identified).
-* **netatalk storage is mixed** on the owner's afpd 4.5.0dev: new files use `._name` plus an xattr, old files use `.AppleDouble/` v2. The client handles both. Whether Finder info is readable without xattrs (§3.1, question 5) decides whether `rsync-netatalk` is needed.
+* **netatalk metadata coverage:** type and creator of files *without* a resource fork may exist only in the xattr (§3.1, 5a). The mitigation is `--mac-types`, or `rsync-netatalk` later.
 * **The netatalk name encoding** for characters the Mac allows but Linux doesn't (`/`), or for names netatalk can't convert, must be checked against afpd's on-disk encoding and reversed in §4.3.
-* **Sidecar mtime behaviour:** opening a file over AFP leaves both mtimes alone (checked). Whether a fork-only edit bumps the data file's mtime (§3.1, question 6) is still open, and it picks the mtime rule in §3.2.
-* **Stability of the `._foo` quick check** (§4.4), and **DST shifts** in mtimes (§4.2).
+* **Sidecar mtime behaviour:** measured (§3.1, 3). Handled by the `max()` rule, which costs accurate modification dates on the Mac unless `--netatalk-dates=data` is added.
+* **Stability of the `._foo` quick check** (§3.2, §4.4). **DST shifts** are handled by the ±3600 s rule (§4.2).
 * **Heap fragmentation** in a fixed partition on very large trees. Mitigations: grow the SIZE resource, and later borrow memory with `TempNewHandle`.
