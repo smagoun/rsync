@@ -65,7 +65,7 @@ Findings:
    * The resource fork is in `._name` next to the data file. The file is 82 bytes of header plus the fork: 82 + 687,608 = 687,690, which matches.
    * The filler is `"Netatalk        "`, *not* `"Mac OS X"`. So the parser identifies these files by their entry table, not by the filler.
 2. **Finder info is copied into the `._` header.** The 32 bytes at offset 50 (`APPL`/`CvMM`, flags, location) are identical to entry 9 in the `user.org.netatalk.Metadata` xattr.
-   * **A stock rsync daemon therefore carries type, creator and Finder flags.** `rsync-netatalk` is not needed for files that have a `._`.
+   * **A stock rsync daemon therefore carries type, creator and Finder flags.** No custom server is needed.
    * The xattr also holds the comment (4), dates (8), AFP info (14) and netatalk's private dev/ino/sync/CNID entries. These are not needed on the Mac. Creation date is the only loss (see 5).
 3. **Mtime behaviour:**
    * Opening a file over AFP changes only the data file's **ctime**. No mtime or size changes.
@@ -73,7 +73,7 @@ Findings:
    * The data file's mtime is the Mac's own modification date, which AFP sets. It stayed in UTC across the Mac's DST change.
 4. **Older `.AppleDouble/` v2 sidecars** (741-byte header) seen earlier may be corrupt or leftovers. The client still parses them, at low priority. The parser is generic over the entry table, so it costs almost nothing extra.
 5. **Still to check:**
-   * *(a)* Does a file **with no resource fork** (a TEXT file with type/creator only) get a `._` file at all? If not, its type and creator exist only in the xattr, and a stock daemon can't send them. **Fallback:** `--mac-types` extension mapping on the client, which is usually fine for source files. If exact type/creator matters for such files, build `rsync-netatalk`.
+   * *(a)* Does a file **with no resource fork** (a TEXT file with type/creator only) get a `._` file at all? If not, its type and creator exist only in the xattr, and a stock daemon can't send them. **Fallback:** `--mac-types` extension mapping on the client, which is usually fine for source files. **Deferred by the owner:** no custom server, so these files get `--mac-types` or nothing for now.
    * *(b)* Does a **Finder-info-only change** (label, type/creator edit, move icon) rewrite the `._` header and bump its mtime?
    * *(c)* The creation date is only in the xattr, so it isn't preserved. The HFS creation date is set to the modification date.
 
@@ -114,7 +114,7 @@ The mapping happens in `platform_flist_received()`, right after the file list ar
 | Server | What runs on it | How forks reach the Mac |
 |---|---|---|
 | **Linux + netatalk (owner's setup)** | **Stock `rsync --daemon` (3.x)**, with a module on the share: `read only = yes`, `uid`/`gid` = the share owner | Client `--netatalk` (§3.2) |
-| Same, if fork-less files need exact type/creator (§3.1, 5a) | Optional **`rsync-netatalk`**: this repo's openrsync built for Linux, with a `platform_netatalk.c` that reads `user.org.netatalk.Metadata` and sends Apple's `-E` format. About 1–2 weeks. **Deferred** until 5a shows it's needed | `-E` |
+| *(Not planned)* | The owner decided against a custom server. Fork-less files with type/creator only in the xattr are out of scope for now (§3.1, 5a). `--mac-types` covers common cases | — |
 | Modern Mac | Apple's stock `rsync --daemon`, run with `-E` | Apple `-E` format (§4.4) |
 | Any AFP server, mounted on the classic Mac | Nothing | The File Manager on the Mac reads forks directly (G1b) |
 
@@ -223,7 +223,7 @@ The rule is deterministic, so later runs and `--delete` find the same local name
   Byte-for-byte equality with the server's AppleDouble isn't required. Both sides only need to compare the same `._foo` the same way:
   * The local "size" of `._foo` is defined as the size the packer produces.
   * The server's synthetic entries carry the base file's mtime.
-  * **Risk:** if the server packs extra data, such as Linux xattrs or macOS quarantine, the sizes never match. The `._foo` then gets a cheap re-check on every run. The fix is to make `rsync-netatalk` pack exactly the layout the Mac's packer produces, and on a Mac server to strip stray xattrs (`xattr -c`) or filter them out.
+  * **Risk:** if the server packs extra data, such as Linux xattrs or macOS quarantine, the sizes never match. The `._foo` then gets a cheap re-check on every run. On a Mac server, the fix is to strip stray xattrs (`xattr -c`) or filter them out.
 * **Type and creator (option, off by default).** `--mac-types` assigns type and creator to files that arrive *without* Finder info:
   * Mappings come from **Internet Config** (`ICMapFilename`, built into 8.1).
   * Prefs can override them, for example `.c .h .r .p → TEXT/KAHL` (THINK C) or `TEXT/CWIE` (CodeWarrior).
@@ -315,7 +315,7 @@ So:
 | **1. Prepare openrsync** | Put file, process and network calls behind `compat_*`. Add `__MACOS_CLASSIC__` guards. Make the daemon-client pull path free of fork. Abstract local mode over "thread or fork". Keep the Linux and macOS builds green | Existing tests pass |
 | **2. Netatalk mapping (Linux-testable)** | `--netatalk` file-list rewriting, a v2 and "Mac OS X" AppleDouble parser/packer, and the size and mtime rules from §3.2. Test on Linux with a mock `platform_classic` that writes forks as `._` files, against a stock rsync daemon serving a copy of the owner's netatalk share.  | Second run against a fixed tree transfers 0 files. Fork and Finder-info bytes round-trip exactly |
 | **3. Mac layers** | `macposix`, `macnet`, name mapping, time conversion, an `fts` replacement. Unit-test app in the emulator | Can list, create, swap and delete a tree, and do TCP echo |
-| **4. MVP: pull with forks (G1)** | `platform_classic.c` unpack and pack, `--delete`, `--whole-file` by default. Test against the netatalk host (`--netatalk` or `rsync-netatalk`) and a macOS daemon (`-E`) | Fixture tree matches exactly. A second run transfers 0 files. Editing one fork transfers only that file |
+| **4. MVP: pull with forks (G1)** | `platform_classic.c` unpack and pack, `--delete`, `--whole-file` by default. Test against the netatalk host (stock daemon, `--netatalk`) and a macOS daemon (`-E`) | Fixture tree matches exactly. A second run transfers 0 files. Editing one fork transfers only that file |
 | **5. Front end** | Prompt, `$(VAR)`, profiles, drag and drop, Cmd-., progress. `--mac-types` and `--mac-text` options | Your workflow works end to end on QEMU, then on the real 68040 |
 | **6. Local/AFP mode (G1b)** | Thread Manager server and fake socketpair | Sync from a mounted netatalk or AppleShare volume |
 | 7. Stretch: push (G2) | OT listener, `daemon.c` without fork (one connection at a time), sender-side traversal, `.rsync-names` | A modern host pushes a tree to the Mac |
@@ -324,7 +324,7 @@ So:
 ## 10. Remaining risks
 
 * **OT glue libraries for 68k under Retro68** (the MacTCP fallback is identified).
-* **netatalk metadata coverage:** type and creator of files *without* a resource fork may exist only in the xattr (§3.1, 5a). The mitigation is `--mac-types`, or `rsync-netatalk` later.
+* **netatalk metadata coverage:** type and creator of files *without* a resource fork may exist only in the xattr (§3.1, 5a). Deferred by the owner. The mitigation is `--mac-types`. A custom server is ruled out.
 * **The netatalk name encoding** for characters the Mac allows but Linux doesn't (`/`), or for names netatalk can't convert, must be checked against afpd's on-disk encoding and reversed in §4.3.
 * **Sidecar mtime behaviour:** measured (§3.1, 3). Handled by the `max()` rule, which costs accurate modification dates on the Mac unless `--netatalk-dates=data` is added.
 * **Stability of the `._foo` quick check** (§3.2, §4.4). **DST shifts** are handled by the ±3600 s rule (§4.2).
