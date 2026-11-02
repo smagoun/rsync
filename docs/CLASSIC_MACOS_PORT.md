@@ -1,6 +1,6 @@
 # Plan: rsync for Classic Mac OS 8.1 with resource-fork support
 
-Status: **plan, revision 2** (it now covers the owner's answers). Nothing is implemented yet.
+Status: **plan, revision 3** (adds the netatalk `.AppleDouble` findings). Nothing is implemented yet.
 
 ## 0. Decisions so far
 
@@ -8,7 +8,7 @@ Status: **plan, revision 2** (it now covers the owner's answers). Nothing is imp
 |---|---|
 | Target | 68040 with 32 MB RAM, Mac OS 8.1, HFS disk. Built as a classic 68k app (not CFM-68K) |
 | Toolchain | **Retro68 only** for rsync itself (see §7 on why THINK C 5 won't work) |
-| Servers | (a) a modern Mac, or (b) Linux running **netatalk 4.x**. Optionally (c) any AFP server mounted on the classic Mac |
+| Servers | (a) a modern Mac, or (b) Linux running **netatalk 4.x** (owner's: afpd 4.5.0dev, `ea = ad`, `.AppleDouble/` sidecars) with a **stock** rsync daemon. Optionally (c) any AFP server mounted on the classic Mac |
 | Resource forks | Required from the first version |
 | Encryption | Not needed for now. Options are in §8 |
 | Type/creator mapping, CR/LF translation | Options exist for both. Both are **off by default** |
@@ -39,23 +39,81 @@ openrsync is the better base for four reasons:
 
 ## 3. Server side: where resource forks live, and how they get onto the wire
 
-The owner didn't know where netatalk 4 keeps resource forks. Here is what the documentation and reports say:
+### 3.1 What the owner's netatalk server does (afpd 4.5.0dev)
 
-* netatalk 4's `afp.conf` option `ea` defaults to auto. It tries `sys` (filesystem extended attributes) first and falls back to `ad` (AppleDouble v2 files in `.AppleDouble/` folders) if the filesystem has no xattrs.
-* With `ea = sys`, the Finder info, dates and AFP metadata go in the xattr `user.org.netatalk.Metadata`.
-* Reports disagree on where the resource fork goes with `ea = sys`. Some say a Mac-OS-X-style `._foo` file next to the data file, others say an xattr (`org.netatalk.ResourceFork`, used on ZFS/Solaris and in newer builds).
+The owner looked at a file that has a resource fork and no data fork:
 
-**Step one of Phase 0 is to check this on a real netatalk 4 volume.** The design below handles all three layouts, so the answer changes only which reader code runs.
+```
+'Civilization™ 1.1.2'                  0 bytes       <- data fork
+'.AppleDouble/Civilization™ 1.1.2'    688339 bytes  <- AppleDouble v2 sidecar
+```
 
-A stock rsync 3.x server can't send any of this. openrsync only speaks protocol 29, which has no xattr support, and even rsync 3's `-X` sends raw xattrs that would need netatalk-specific decoding on the Mac. So the plan uses **one wire format, Apple's `-E`**, and makes every server speak it:
+So this volume uses **`ea = ad`**: netatalk's AppleDouble v2 "sidecar" layout. The sidecar layout is fixed by netatalk's `include/atalk/adouble.h`:
 
-| Server | What runs on it | How forks are read |
+* **Header:**
+  * magic `0x00051607`, version `0x00020000`, filler `"Netatalk        "`
+  * 13 entries, making a **fixed 741-byte header** (`AD_DATASZ2`)
+  * then the resource fork, which runs to the end of the file
+* **Entries:**
+  * name (3), comment (4), file dates (8), Finder info (9, 32 bytes), short name (13)
+  * AFP file info (14), ProDOS info (11), DID (15)
+  * netatalk private entries 16–19: device, inode, sync stamp, CNID
+  * resource fork (2)
+* **Size:** the sidecar is 741 bytes plus the resource fork length. For Civilization that means a 687,598-byte resource fork. *Check this against the Mac's Get Info.*
+* **Folders:** a folder's Finder info lives in `<folder>/.AppleDouble/.Parent`.
+* **Names:** the name on disk is UTF-8 (`™`), and netatalk translates it to MacRoman (`0xAA`) for classic clients. Our client-side mapping (§4.3) does the same, so names match what the Finder shows when it mounts the share.
+* **Other modes, for completeness:**
+  * With `ea = sys`, Finder info goes into the `user.org.netatalk.Metadata` xattr.
+  * The resource fork then goes into a Mac-OS-X-style `._foo` file: 82-byte header, filler `"Mac OS X"`, entries 9 and 2.
+
+### 3.2 Consequence: a **stock rsync daemon** on the Linux host is enough
+
+With `ea = ad`, all metadata lives in ordinary files. Any rsync 3.x daemon on the Linux host sends `.AppleDouble/` folders like any other file. It speaks protocol 29, which openrsync uses. **No custom server software is needed.**
+
+The classic client handles netatalk storage in a mode called `--netatalk` (`-N`), using only rsync's standard wire format. The mapping happens in `platform_flist_received()`, right after the file list arrives. File transfers are requested by list index, not by name, so renaming entries on the client side doesn't affect the server:
+
+| Entry on the wire | What the client does |
+|---|---|
+| `dir/.AppleDouble/` (folder) | Removes it from the local view. No such folder is created on HFS |
+| `dir/.AppleDouble/foo` | Renamed to a synthetic `dir/._foo` linked to `dir/foo`. After transfer it is unpacked by the same code as Apple's `-E` (§4.4): entry 2 becomes the resource fork, entry 9 the Finder info, entry 8 the creation date. Entries 3, 4, 11, 13–19 are ignored |
+| `dir/.AppleDouble/.Parent` | The folder's Finder info (window position, view, flags) |
+| `._foo` with filler `"Mac OS X"` (the `ea = sys` layout) | Same as above, for the fork. Finder info is used only if entry 9 is present |
+| `.AppleDB/`, `.AppleDesktop/`, `Network Trash Folder`, `Temporary Items`, `.DS_Store`, `:2eDS_Store` | Excluded by a built-in filter list in `--netatalk` mode |
+
+**How the quick check stays stable** (unchanged files must not be re-sent):
+
+* **Size.** The local "size" of a virtual `.AppleDouble/foo` is computed as 741 plus the local resource fork length. That is exactly the netatalk sidecar size, so sizes match without packing anything.
+* **Modification time.** HFS keeps *one* modification date per file, but the server has two: one for the data file and one for the sidecar. In `platform_flist_received()` the client gives both entries `max(data mtime, sidecar mtime)` and sets the HFS modification date to that value.
+  * Unchanged files then match on both entries.
+  * If either side changes, both entries are re-checked. In `--whole-file` mode both are re-sent, which is cheap for source files.
+* **Basis for delta mode.** The local file is packed into a netatalk-layout v2 AppleDouble. The private entries are zeroed, but that only matters inside changed blocks.
+* **`--delete`.**
+  * When a sidecar disappears on the server, the client clears the local resource fork and Finder info.
+  * When a data file disappears, the client deletes the HFS file, both forks together.
+
+### 3.3 Server options
+
+| Server | What runs on it | How forks reach the Mac |
 |---|---|---|
-| Modern Mac | Apple's stock `/usr/bin/rsync --daemon` (openrsync, or rsync 2.6.9 on macOS ≤12), run with `-E` | Native, through `copyfile()` |
-| Linux + netatalk 4 | **`rsync-netatalk`**: this repo's openrsync built for Linux, with a new `platform_netatalk.c` hook layer | Builds the `._foo` AppleDouble from `user.org.netatalk.Metadata` (Finder info, dates) plus the resource fork, taken from `._foo`, the `org.netatalk.ResourceFork` xattr, or `.AppleDouble/foo`, whichever exists |
-| Any AFP server (real Mac, netatalk, AppleShare) | Nothing. The volume is mounted on the classic Mac (G1b) | The File Manager on the Mac reads them directly |
+| **Linux + netatalk, `ea = ad`** (owner's setup) | Stock `rsync --daemon` (3.x) with a module pointing at the netatalk share. Use `read only = yes` and `uid` set to the share owner | Client `--netatalk` mapping (§3.2) |
+| Linux + netatalk, `ea = sys` | Stock rsync daemon **if** Finder info is optional, because forks come from `._foo` but type/creator lives in an xattr that protocol 29 can't send. Otherwise **`rsync-netatalk`**: this repo's openrsync built for Linux with a `platform_netatalk.c` that sends Apple's `-E` format | `--netatalk` or `-E` |
+| Modern Mac | Apple's stock `rsync --daemon`, run with `-E` | Apple `-E` format (§4.4) |
+| Any AFP server, mounted on the classic Mac | Nothing | The File Manager on the Mac reads forks directly (G1b) |
 
-`rsync-netatalk` should be read-only toward the netatalk metadata at first. The stretch goal (push to the Mac) doesn't need it to write, and pulling from Linux never writes to the server.
+A server-side example (`/etc/rsyncd.conf` on the netatalk host):
+
+```
+[src]
+    path = /srv/afp/Projects
+    read only = yes
+    uid = user
+    gid = user
+    # optional: hosts allow = 192.168.1.0/24
+```
+
+On the Mac you then type: `rsync -av --netatalk --delete $(SRV)::src/MyApp "Macintosh HD:Projects:MyApp"`
+
+Because `--netatalk` needs no special server, `rsync-netatalk` drops out of the critical path. It is built only if `ea = sys` volumes with type/creator turn out to matter.
 
 ## 4. Client architecture (classic Mac)
 
@@ -202,7 +260,7 @@ So:
   1. The test build of the app autoruns from Startup Items.
   2. It reads a script file from a second HFS disk image, runs the syncs, writes a manifest (names, data and fork hashes, type/creator, dates) to that disk, and shuts down.
   3. Linux reads the disk back with `hfsutils` (`hcopy -m` keeps forks) and compares the manifest with the fixtures on the server.
-* **Server fixtures**, on a netatalk 4 container and a Mac (or the `rsync-netatalk` daemon). Each test tree includes:
+* **Server fixtures**, on a netatalk 4 (`ea = ad`) host with a stock rsync daemon, and on a Mac. Each test tree includes:
   * files with only a resource fork, and files with both forks
   * custom type/creator and folder Finder info
   * long, non-ASCII, `:`-containing and case-colliding names
@@ -234,11 +292,11 @@ So:
 
 | Phase | Work | Exit criterion |
 |---|---|---|
-| **0. Groundwork** | Build Retro68 (m68k) in Docker and CI. Bring up QEMU q800 with 8.1, OT and networking. Write a hello-world TCP client using OT (or MacTCP as fallback). Set up a netatalk 4 test server and **find out where it stores forks** (§3). Measure MD4 speed and TCP throughput on the emulator | Hello-world connects from the emulator. Fork storage is documented |
+| **0. Groundwork** | Build Retro68 (m68k) in Docker and CI. Bring up QEMU q800 with 8.1, OT and networking. Write a hello-world TCP client using OT (or MacTCP as fallback). Set up a netatalk 4 (`ea = ad`) test server mirroring the owner's (§3.1). Measure MD4 speed and TCP throughput on the emulator | Hello-world connects from the emulator. Fork storage is documented |
 | **1. Prepare openrsync** | Put file, process and network calls behind `compat_*`. Add `__MACOS_CLASSIC__` guards. Make the daemon-client pull path free of fork. Abstract local mode over "thread or fork". Keep the Linux and macOS builds green | Existing tests pass |
-| **2. `rsync-netatalk` server** | `platform_netatalk.c`: build `._foo` AppleDouble from netatalk storage, and reuse Apple's `-E` code path. Test against Apple's macOS rsync running as the client | A macOS `rsync -E` pull from the Linux daemon recreates forks and Finder info exactly |
+| **2. Netatalk mapping (Linux-testable)** | `--netatalk` file-list rewriting, a v2 and "Mac OS X" AppleDouble parser/packer, and the size and mtime rules from §3.2. Test on Linux with a mock `platform_classic` that writes forks as `._` files, against a stock rsync daemon serving a copy of the owner's netatalk share | Second run against a fixed tree transfers 0 files. Fork and Finder-info bytes round-trip exactly |
 | **3. Mac layers** | `macposix`, `macnet`, name mapping, time conversion, an `fts` replacement. Unit-test app in the emulator | Can list, create, swap and delete a tree, and do TCP echo |
-| **4. MVP: pull with forks (G1)** | `platform_classic.c` unpack and pack, `--delete`, `--whole-file` by default. Test against a macOS daemon and the `rsync-netatalk` daemon | Fixture tree matches exactly. A second run transfers 0 files. Editing one fork transfers only that file |
+| **4. MVP: pull with forks (G1)** | `platform_classic.c` unpack and pack, `--delete`, `--whole-file` by default. Test against a stock rsync daemon on the netatalk host (`--netatalk`) and a macOS daemon (`-E`) | Fixture tree matches exactly. A second run transfers 0 files. Editing one fork transfers only that file |
 | **5. Front end** | Prompt, `$(VAR)`, profiles, drag and drop, Cmd-., progress. `--mac-types` and `--mac-text` options | Your workflow works end to end on QEMU, then on the real 68040 |
 | **6. Local/AFP mode (G1b)** | Thread Manager server and fake socketpair | Sync from a mounted netatalk or AppleShare volume |
 | 7. Stretch: push (G2) | OT listener, `daemon.c` without fork (one connection at a time), sender-side traversal, `.rsync-names` | A modern host pushes a tree to the Mac |
@@ -247,6 +305,8 @@ So:
 ## 10. Remaining risks
 
 * **OT glue libraries for 68k under Retro68** (the MacTCP fallback is identified).
-* **netatalk 4 fork storage** varies by version and `ea` mode. The reader handles all three layouts, but this must be checked in Phase 0.
+* **netatalk fork storage** is confirmed as `ea = ad` (`.AppleDouble/` v2) on the owner's afpd 4.5.0dev. If the owner later switches to `ea = sys`, or netatalk converts the volume (`convert appledouble`), the client must use the `._` mapping or `rsync-netatalk` (§3.3).
+* **The netatalk name encoding** for characters the Mac allows but Linux doesn't (`/`), or for names netatalk can't convert, must be checked against afpd's on-disk encoding and reversed in §4.3.
+* **Sidecar mtime behaviour:** check that afpd only touches the `.AppleDouble/foo` mtime when the metadata or fork really changes, not on every Finder open (for example when it rewrites the CNID or sync stamp). If it touches it too often, many files get needless re-checks. The fallback is to compare sidecars by size only.
 * **Stability of the `._foo` quick check** (§4.4), and **DST shifts** in mtimes (§4.2).
 * **Heap fragmentation** in a fixed partition on very large trees. Mitigations: grow the SIZE resource, and later borrow memory with `TempNewHandle`.
