@@ -157,8 +157,14 @@ On the Mac you then type: `rsync -av --netatalk --delete $(SRV)::src/MyApp "Maci
 * **A single colon means an HFS path.** Remote shells aren't supported, so on the Mac `Macintosh HD:Projects` is a local HFS path, not `host:path`.
 * **TCP comes from Open Transport 1.3**, which ships with 8.1. `macnet/` offers `socket/connect/read/write/close/poll` for TCP only.
   * It runs synchronously, with a sync-idle callback that calls `WaitNextEvent`. That keeps the Finder alive and lets Cmd-. abort.
-  * 68k apps reach OT through static glue libraries from Apple's Universal Interfaces/MPW. Retro68's `ConvertObj` can convert `OpenTransport.o`.
-  * **Phase 0 checks this.** If the OT glue is a problem, the fallback is the MacTCP API, which OT supports for compatibility and which Multiversal Interfaces declares. Several Retro68 projects already use it.
+  * **Decision (Phase 0): use the MacTCP API, not native OT calls.**
+    * Retro68's open-source Multiversal Interfaces declare all of MacTCP (`.IPP` driver `PBControl` calls and `MacTCP DNR`).
+    * They have **no** Open Transport, Thread Manager, Internet Config or Text Encoding Converter headers.
+    * 68k OT clients would also need Apple's proprietary Universal Interfaces plus static glue libraries.
+    * OT on 8.1 supports MacTCP calls for compatibility, and the owner's image has `MacTCP DNR` in the System Folder.
+    * The API is asynchronous and parameter-block based. `macnet/` hides that behind blocking calls that poll and call `WaitNextEvent`.
+    * Native OT stays an optional later optimisation, if throughput is poor.
+  * **Thread Manager** (needed only for local mode) is a single trap, `_ThreadDispatch` (0xABF2). The few calls needed are declared by hand.
 * **Local mode (G1b):** openrsync forks a local "server" connected by a `socketpair()`. On the Mac:
   * That server runs in a **Thread Manager cooperative thread**, connected through an in-memory duplex buffer.
   * `poll()` on that buffer yields to the other thread until data is ready.
@@ -196,7 +202,7 @@ On the Mac you then type: `rsync -av --netatalk --delete $(SRV)::src/MyApp "Maci
 The wire carries UTF-8 names. HFS holds names of at most 31 bytes, in MacRoman, without `:`, and case-insensitive. Names are mapped with **a deterministic rule that needs no stored state**:
 
 1. **Normalize** to NFC. macOS servers may send decomposed (NFD) names.
-2. **Convert to MacRoman** with a table compiled into the app. Text Encoding Converter isn't guaranteed on 8.1.
+2. **Convert to MacRoman** with a table compiled into the app. Retro68's headers don't cover Text Encoding Converter, and a 128-entry table is simpler anyway.
 3. **Translate `:` to `/`.** HFS allows `/` in names, and the Finder uses the same swap.
 4. **Mangle names that don't fit.** If a name has characters MacRoman lacks, or is longer than 31 bytes, it becomes `<prefix>#XXXX<.ext>`:
    * `XXXX` is 4 hex digits of a hash of the full UTF-8 name.
@@ -225,7 +231,7 @@ The rule is deterministic, so later runs and `--delete` find the same local name
   * The server's synthetic entries carry the base file's mtime.
   * **Risk:** if the server packs extra data, such as Linux xattrs or macOS quarantine, the sizes never match. The `._foo` then gets a cheap re-check on every run. On a Mac server, the fix is to strip stray xattrs (`xattr -c`) or filter them out.
 * **Type and creator (option, off by default).** `--mac-types` assigns type and creator to files that arrive *without* Finder info:
-  * Mappings come from **Internet Config** (`ICMapFilename`, built into 8.1).
+  * Mappings come from a **built-in extension table**, which prefs can extend. Internet Config isn't in Retro68's headers and isn't worth the glue code.
   * Prefs can override them, for example `.c .h .r .p → TEXT/KAHL` (THINK C) or `TEXT/CWIE` (CodeWarrior).
   * Files that arrived with Finder info are left alone.
 * **CR/LF translation (option, off by default).** `--mac-text[=exts]` translates line endings:
@@ -323,7 +329,7 @@ So:
 
 ## 10. Remaining risks
 
-* **OT glue libraries for 68k under Retro68** (the MacTCP fallback is identified).
+* **MacTCP-over-OT throughput** on the emulator and on the real 68040 is measured in Phase 0.
 * **netatalk metadata coverage:** type and creator of files *without* a resource fork may exist only in the xattr (§3.1, 5a). Deferred by the owner. The mitigation is `--mac-types`. A custom server is ruled out.
 * **The netatalk name encoding** for characters the Mac allows but Linux doesn't (`/`), or for names netatalk can't convert, must be checked against afpd's on-disk encoding and reversed in §4.3.
 * **Sidecar mtime behaviour:** measured (§3.1, 3). Handled by the `max()` rule, which costs accurate modification dates on the Mac unless `--netatalk-dates=data` is added.
