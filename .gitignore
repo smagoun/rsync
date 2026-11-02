@@ -1,0 +1,7 @@
+
+# Emulator images, ROMs and OS media (licensed, never commit)
+/emu/
+*.utm/
+*.rom
+*.ROM
+*.qcow2
