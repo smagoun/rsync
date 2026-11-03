@@ -95,14 +95,13 @@ The mapping happens in `platform_flist_received()`, right after the file list ar
 **How the quick check stays stable** (unchanged files must not be re-sent):
 
 * **Size.** The local "size" of a `._foo` entry is 82 plus the local resource fork length. For a `.AppleDouble/foo` entry it is 741 plus that length. Nothing is packed to work this out. The first transfer checks that the header the server sent has the expected size. If not, the actual size is used.
-* **Modification time.** The server's two mtimes are folded into the one HFS modification date. Fact 3 shows that a fork edit bumps only the sidecar, so:
-  1. On the client only, both list entries for a file get **`max(data mtime, sidecar mtime)`**.
-  2. That value is written as the file's HFS modification date.
-  3. On the next run, a change on either side changes the max. Both entries are then re-checked, and with `--whole-file` both are re-sent, which is cheap.
+* **Modification time (implemented).** The server's two mtimes are kept **separately** on the client:
+  * the data file's mtime becomes the HFS **modification date**, which is the Mac's true date (fact 3);
+  * the sidecar's mtime is stored in the HFS **backup date**. Nothing else on a client machine uses that field; the Linux test backend keeps it as the mtime of `.finf/NAME`.
 
-  *Trade-off:* the Mac shows the server's sidecar write time as the modification date, when that is newer than the data mtime. For files saved from a Mac over AFP the two are within seconds of each other. For files only copied, it is the copy time.
-  * `--netatalk-dates=data` keeps the true data-file date on HFS instead. The client then records each sidecar's server mtime in an invisible per-tree state file (`.rsync-netatalk`). If that file is lost, the cost is one full re-check.
-  * Recommendation: ship `max()` first, and add `data` later if the dates matter to you.
+  The virtual `._foo` reports the backup date as its mtime. A fork-only change on the server re-sends only `._foo`, and a data-only change re-sends only `foo`. `classic/tests/netatalk_test.sh` checks both.
+
+  *Trade-off:* if someone edits a resource fork **on the Mac** without changing the fork's length, the next sync won't notice and won't restore the server's version. Use `--checksum` to force a full comparison.
 * **Basis for delta mode.** The local fork and Finder info are packed in netatalk's 82-byte `._` layout, so the basis matches the server byte for byte except where it really changed.
 * **`--delete`:**
   * When the sidecar disappears on the server, the client clears the local fork and Finder info.
@@ -332,6 +331,6 @@ So:
 * **MacTCP-over-OT throughput** on the emulator and on the real 68040 is measured in Phase 0.
 * **netatalk metadata coverage:** type and creator of files *without* a resource fork may exist only in the xattr (§3.1, 5a). Deferred by the owner. The mitigation is `--mac-types`. A custom server is ruled out.
 * **The netatalk name encoding** for characters the Mac allows but Linux doesn't (`/`), or for names netatalk can't convert, must be checked against afpd's on-disk encoding and reversed in §4.3.
-* **Sidecar mtime behaviour:** measured (§3.1, 3). Handled by the `max()` rule, which costs accurate modification dates on the Mac unless `--netatalk-dates=data` is added.
+* **Sidecar mtime behaviour:** measured (§3.1, 3). Handled by storing the sidecar mtime in the HFS backup date (§3.2).
 * **Stability of the `._foo` quick check** (§3.2, §4.4). **DST shifts** are handled by the ±3600 s rule (§4.2).
 * **Heap fragmentation** in a fixed partition on very large trees. Mitigations: grow the SIZE resource, and later borrow memory with `TempNewHandle`.
