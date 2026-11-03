@@ -64,7 +64,12 @@ int password_enabled(void);	/* password_enabled.c */
 #define	_PATH_ETC	"/etc"
 #endif
 
+#ifdef __MACOS_CLASSIC__
+/* Next to the application (its folder is the current directory). */
+#define	_PATH_RSYNCD_CONF	"rsyncd.conf"
+#else
 #define	_PATH_RSYNCD_CONF	_PATH_ETC "/rsyncd.conf"
+#endif
 #define	RSYNCD_DEFAULT_CFG	_PATH_RSYNCD_CONF
 
 extern struct cleanup_ctx	*cleanup_ctx;
@@ -1345,6 +1350,64 @@ fail:
 	return ERR_IPC;
 }
 
+#if defined(__MACOS_CLASSIC__) || defined(OPENRSYNC_INLINE_DAEMON)
+/*
+ * Classic Mac OS has no fork(): connections are served one at a time in
+ * this process.  rsync_daemon_handler() was written for a forked child and
+ * consumes the listener's state (config, motd, pidfile), so give it a
+ * private copy, and run it guarded so that exit() inside a transfer ends
+ * only this connection (classic_guarded() is in the front end).
+ */
+struct classic_conn {
+	struct sess		*sess;
+	int			 fd;
+	struct sockaddr_storage	*saddr;
+	socklen_t		 slen;
+};
+
+int	classic_guarded(int (*)(void *), void *);
+void	rules_reset(void);
+
+static int
+classic_conn_run(void *arg)
+{
+	struct classic_conn *c = arg;
+
+	return rsync_daemon_handler(c->sess, c->fd, c->saddr, c->slen);
+}
+
+static int
+classic_daemon_handler(struct sess *sess, int fd,
+    struct sockaddr_storage *saddr, socklen_t slen)
+{
+	struct daemon_role role = *(struct daemon_role *)sess->role;
+	struct sess csess = *sess;
+	struct classic_conn c;
+	int rc;
+
+	role.dcfg = NULL;
+	role.pidfp = NULL;
+	role.lockfd = -1;
+	role.auth_user = NULL;
+	role.motd_file = ((struct daemon_role *)sess->role)->motd_file ?
+	    strdup(((struct daemon_role *)sess->role)->motd_file) : NULL;
+	csess.role = (void *)&role;
+	/* The handler frees and re-reads the configuration: give it its own. */
+	if ((role.dcfg = daemon_cfg_parse(&csess, 0)) == NULL) {
+		free(role.motd_file);
+		return ERR_IPC;
+	}
+	c.sess = &csess;
+	c.fd = fd;
+	c.saddr = saddr;
+	c.slen = slen;
+	rc = classic_guarded(classic_conn_run, &c);
+	LOG0("connection from %s finished (exit %d)", role.client_addr, rc);
+	rules_reset();		/* the client's filters */
+	return rc;
+}
+#endif /* __MACOS_CLASSIC__ || OPENRSYNC_INLINE_DAEMON */
+
 static void
 get_global_cfgstr(struct daemon_cfg *dcfg, const char *key, const char **out)
 {
@@ -1481,6 +1544,11 @@ rsync_daemon(int argc, char *argv[], struct opts *daemon_opts)
 	argc -= optind;
 	argv += optind;
 
+#ifdef __MACOS_CLASSIC__
+	if (daemon_opts->ipf == 0)
+		daemon_opts->ipf = 4;	/* MacTCP is IPv4 only */
+#endif
+
 	/*
 	 * We'll act on this after we pick up the initial config.
 	 */
@@ -1498,8 +1566,12 @@ rsync_daemon(int argc, char *argv[], struct opts *daemon_opts)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#ifndef __MACOS_CLASSIC__
 	if (!role.socket_initiator && detach && daemon(1, 0) == -1)
 		err(ERR_IPC, "daemon");
+#else
+	(void)detach;	/* runs in the foreground, in the console window */
+#endif
 #pragma clang diagnostic pop
 
 #ifdef __APPLE__
@@ -1560,7 +1632,11 @@ rsync_daemon(int argc, char *argv[], struct opts *daemon_opts)
 
 	LOG0("openrsync listening on port '%s'", daemon_opts->port);
 
+#if defined(__MACOS_CLASSIC__) || defined(OPENRSYNC_INLINE_DAEMON)
+	rc = rsync_listen(&sess, &classic_daemon_handler);
+#else
 	rc = rsync_listen(&sess, &rsync_daemon_handler);
+#endif
 	if (role.pidfp != NULL) {
 		/*
 		 * We still have the lock, so we can safely unlink and close it.

@@ -56,8 +56,6 @@ struct {								\
 /* Restart getopt(3) from argv[1]. */
 #if defined(__GLIBC__)
 #define PORTABLE_GETOPT_RESET()	do { optind = 0; } while (0)
-#elif defined(__MACOS_CLASSIC__)
-#define PORTABLE_GETOPT_RESET()	do { optind = 1; } while (0)
 #else
 #define PORTABLE_GETOPT_RESET()	do { optreset = 1; optind = 1; } while (0)
 #endif

@@ -133,7 +133,8 @@ mkpathat(int fd, char *path, mode_t mode)
 				 * AT_RESOLVE_BENEATH violation then we want to
 				 * kick that back instead.
 				 */
-				*slash = '/';
+				if (!done)	/* don't clobber the final NUL */
+					*slash = '/';
 #ifdef AT_RESOLVE_BENEATH_ERRNO
 				if (errno == AT_RESOLVE_BENEATH_ERRNO)
 					return (-1);
@@ -144,7 +145,8 @@ mkpathat(int fd, char *path, mode_t mode)
 			if (!S_ISDIR(sb.st_mode)) {
 				/* Is there, but isn't a directory */
 				errno = ENOTDIR;
-				*slash = '/';
+				if (!done)
+					*slash = '/';
 				return (-1);
 			}
 		}

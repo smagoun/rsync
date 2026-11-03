@@ -70,6 +70,8 @@ __wrap__getentropy_r(struct _reent *r, void *buf, size_t len)
  * few ticks; WaitNextEvent with an empty mask consumes no events, so the
  * console window keeps its own.
  */
+int mp_interrupted;
+
 void
 mp_yield(void)
 {
@@ -80,6 +82,12 @@ mp_yield(void)
 		return;
 	last = TickCount();
 	WaitNextEvent(0, &ev, 0, NULL);
+	/* Cmd-. : take it out of the queue and flag an interrupt. */
+	if (EventAvail(keyDownMask, &ev) && (ev.modifiers & cmdKey) &&
+	    (ev.message & charCodeMask) == '.') {
+		GetNextEvent(keyDownMask, &ev);
+		mp_interrupted = 1;
+	}
 }
 
 /* ---- processes --------------------------------------------------------- */
@@ -191,10 +199,52 @@ int setgid(gid_t g)		{ (void)g; return 0; }
 int setreuid(uid_t a, uid_t b)	{ (void)a; (void)b; return 0; }
 int setregid(gid_t a, gid_t b)	{ (void)a; (void)b; return 0; }
 
-struct passwd *getpwnam(const char *n)	{ (void)n; return NULL; }
-struct passwd *getpwuid(uid_t u)	{ (void)u; return NULL; }
-struct group *getgrnam(const char *n)	{ (void)n; return NULL; }
-struct group *getgrgid(gid_t g)		{ (void)g; return NULL; }
+/*
+ * One user and group: any name (rsyncd.conf's "uid = nobody" default, a
+ * client's numeric ids) maps to id 0, so the daemon's checks pass.
+ */
+static char pw_name[32] = "mac", empty[] = "";
+
+struct passwd *
+getpwnam(const char *n)
+{
+	static struct passwd pw;
+
+	snprintf(pw_name, sizeof(pw_name), "%s", n);
+	pw.pw_name = pw_name;
+	pw.pw_passwd = empty;
+	pw.pw_dir = empty;
+	pw.pw_shell = empty;
+	return &pw;
+}
+
+struct passwd *
+getpwuid(uid_t u)
+{
+	(void)u;
+	return getpwnam("mac");
+}
+
+struct group *
+getgrnam(const char *n)
+{
+	static char *members[] = { NULL };
+	static char gr_name[32];
+	static struct group gr;
+
+	snprintf(gr_name, sizeof(gr_name), "%s", n);
+	gr.gr_name = gr_name;
+	gr.gr_passwd = empty;
+	gr.gr_mem = members;
+	return &gr;
+}
+
+struct group *
+getgrgid(gid_t g)
+{
+	(void)g;
+	return getgrnam("mac");
+}
 
 /* ---- signals: none on Classic Mac OS ----------------------------------- */
 
@@ -351,10 +401,42 @@ getdelim(char **lineptr, size_t *n, int delim, FILE *fp)
 	return (ssize_t)len;
 }
 
+/*
+ * Mac text files end lines with CR: getline() accepts CR, LF and CRLF and
+ * always returns the line ending in '\n'.
+ */
 ssize_t
 getline(char **lineptr, size_t *n, FILE *fp)
 {
-	return getdelim(lineptr, n, '\n', fp);
+	size_t len = 0;
+	char *nb;
+	int c;
+
+	if (*lineptr == NULL || *n == 0) {
+		*n = 128;
+		if ((*lineptr = malloc(*n)) == NULL)
+			return -1;
+	}
+	while ((c = getc(fp)) != EOF) {
+		if (len + 2 > *n) {
+			if ((nb = realloc(*lineptr, *n * 2)) == NULL)
+				return -1;
+			*lineptr = nb;
+			*n *= 2;
+		}
+		if (c == '\r') {
+			if ((c = getc(fp)) != '\n' && c != EOF)
+				ungetc(c, fp);
+			c = '\n';
+		}
+		(*lineptr)[len++] = (char)c;
+		if (c == '\n')
+			break;
+	}
+	if (len == 0)
+		return -1;
+	(*lineptr)[len] = '\0';
+	return (ssize_t)len;
 }
 
 /* ---- passwords ---------------------------------------------------------- */

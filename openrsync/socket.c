@@ -932,6 +932,14 @@ rsync_listen(struct sess *sess, rsync_client_handler *handler)
 
 	for (;;) {
 		if ((c = poll(pfd, (nfds_t)bsrcsz, INFTIM)) == -1) {
+#ifdef __MACOS_CLASSIC__
+			if (errno == EINTR) {	/* Cmd-. */
+				LOG0("daemon stopped");
+				for (i = 0; i < bsrcsz; i++)
+					close(pfd[i].fd);
+				return 0;
+			}
+#endif
 			if (errno == EINTR)
 				continue;
 			ERR("poll");
@@ -958,6 +966,13 @@ rsync_listen(struct sess *sess, rsync_client_handler *handler)
 				continue;
 			}
 
+#if defined(__MACOS_CLASSIC__) || defined(OPENRSYNC_INLINE_DAEMON)
+			/* No fork(): serve this client, then listen again. */
+			(void)pid;
+			(void)(*handler)(sess, clsock, &saddr, slen);
+			close(clsock);
+			continue;
+#endif
 			pid = fork();
 			if (pid != 0) {
 				/*

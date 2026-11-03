@@ -365,8 +365,13 @@ unsigned mp_sleep(unsigned);
 int	mp_usleep(useconds_t);
 int	mp_pipe(int [2]);
 
+/* BSD getopt_long (getopt_long.c): set optreset = 1 to restart. */
+extern int optreset;
+
 /* Called often in long loops: lets the Mac breathe and checks Cmd-. */
 void	mp_yield(void);
+/* Set by mp_yield() when the user presses Cmd-.; waits return EINTR. */
+extern int mp_interrupted;
 int	mp_vsnprintf(char *, size_t, const char *, va_list);
 extern int mp_tracing;
 

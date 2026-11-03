@@ -565,7 +565,7 @@ ruleset_free(struct ruleset *ruleset)
 }
 
 
-#ifdef __MACOS_CLASSIC__
+#if defined(__MACOS_CLASSIC__) || defined(OPENRSYNC_INLINE_DAEMON)
 /*
  * The Classic Mac OS front end runs several transfers in one process;
  * forget the previous command's filter rules (nothing is sent anywhere).

@@ -3,9 +3,11 @@
  *
  * Open Transport on Mac OS 8.1 serves the MacTCP driver interface
  * (".IPP"), which Retro68's open-source headers describe; OT's own API
- * would need Apple's SDK.  Only IPv4 TCP client sockets are supported,
- * which is all an rsync daemon client needs.  Calls are synchronous; the
- * waiting loops call mp_yield() so other applications keep running.
+ * would need Apple's SDK.  IPv4 TCP only.  Client calls are synchronous;
+ * a listening socket keeps an asynchronous passive open outstanding, and
+ * accept() hands that connected stream over and arms a new one (MacTCP
+ * streams carry exactly one connection).  Waiting loops call mp_yield()
+ * so other applications keep running, and stop with EINTR on Cmd-.
  */
 #include "mpint.h"
 
@@ -21,9 +23,16 @@ struct mp_sock {
 	int		rdshut;		/* remote closed, nothing left */
 	ip_addr		rhost;
 	tcp_port	rport;
+	/* listening sockets */
+	int		listening;
+	tcp_port	lport;		/* from bind() */
+	int		pending;	/* passive open outstanding in ppb */
+	TCPiopb		ppb;
 };
 
 static short drv;
+
+static int	accept_ready(struct mp_sock *);
 
 const struct in6_addr in6addr_any;
 
@@ -86,13 +95,34 @@ tcperr(OSErr err)
 
 /* ---- sockets --------------------------------------------------------- */
 
+/* A MacTCP stream with its receive buffer, for s. */
+static int
+new_stream(struct mp_sock *s)
+{
+	TCPiopb pb;
+	OSErr err;
+
+	if ((s->rbuf = NewPtr(RCVBUF_SIZE)) == NULL) {
+		errno = ENOMEM;
+		return -1;
+	}
+	memset(&pb, 0, sizeof(pb));
+	pb.csParam.create.rcvBuff = s->rbuf;
+	pb.csParam.create.rcvBuffLen = RCVBUF_SIZE;
+	if ((err = tcp(&pb, TCPCreate, NULL)) != noErr) {
+		DisposePtr(s->rbuf);
+		s->rbuf = NULL;
+		return tcperr(err);
+	}
+	s->stream = pb.tcpStream;
+	return 0;
+}
+
 int
 mp_socket(int domain, int type, int proto)
 {
 	struct mp_sock *s;
 	struct mp_fd *f;
-	TCPiopb pb;
-	OSErr err;
 	int fd;
 
 	(void)proto;
@@ -105,20 +135,10 @@ mp_socket(int domain, int type, int proto)
 		return -1;
 	if ((s = calloc(1, sizeof(*s))) == NULL)
 		return -1;
-	if ((s->rbuf = NewPtr(RCVBUF_SIZE)) == NULL) {
+	if (new_stream(s) == -1) {
 		free(s);
-		errno = ENOMEM;
 		return -1;
 	}
-	memset(&pb, 0, sizeof(pb));
-	pb.csParam.create.rcvBuff = s->rbuf;
-	pb.csParam.create.rcvBuffLen = RCVBUF_SIZE;
-	if ((err = tcp(&pb, TCPCreate, NULL)) != noErr) {
-		DisposePtr(s->rbuf);
-		free(s);
-		return tcperr(err);
-	}
-	s->stream = pb.tcpStream;
 	if ((fd = mp_fdalloc(&f)) == -1) {
 		mp_sock_close(s);
 		return -1;
@@ -215,6 +235,10 @@ mp_sock_read(struct mp_sock *s, void *buf, size_t len)
 			s->rdshut = 1;
 			return 0;
 		}
+		if (mp_interrupted) {
+			errno = EINTR;
+			return -1;
+		}
 		mp_yield();
 	}
 	if ((long)len > avail)
@@ -268,6 +292,17 @@ mp_sock_close(struct mp_sock *s)
 {
 	TCPiopb pb;
 
+	if (s->stream == NULL) {
+		free(s);
+		return 0;
+	}
+	if (s->pending) {
+		/* Cancel the outstanding passive open. */
+		memset(&pb, 0, sizeof(pb));
+		tcp(&pb, TCPAbort, s->stream);
+		while (s->ppb.ioResult == inProgress)
+			mp_yield();
+	}
 	if (s->connected) {
 		memset(&pb, 0, sizeof(pb));
 		pb.csParam.close.ulpTimeoutValue = 10;
@@ -288,6 +323,11 @@ mp_sock_poll(struct mp_sock *s, short events, short *revents)
 	int closed;
 
 	*revents = 0;
+	if (s->listening) {
+		if ((events & POLLIN) && accept_ready(s))
+			*revents = POLLIN;
+		return 0;
+	}
 	if (!s->connected) {
 		*revents = POLLHUP;
 		return 0;
@@ -403,36 +443,133 @@ mp_writev(int fd, const struct iovec *iov, int n)
 	return total;
 }
 
-/* Server-side sockets and local socket pairs are not supported (yet). */
+/* ---- listening ------------------------------------------------------ */
+
 int
 mp_bind(int fd, const struct sockaddr *sa, socklen_t len)
 {
-	(void)fd;
-	(void)sa;
-	(void)len;
-	errno = EOPNOTSUPP;
-	return -1;
+	const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
+	struct mp_sock *s;
+
+	if ((s = sock(fd)) == NULL)
+		return -1;
+	if (len < sizeof(*sin) || sin->sin_family != AF_INET) {
+		errno = EAFNOSUPPORT;
+		return -1;
+	}
+	s->lport = sin->sin_port;
+	return 0;
+}
+
+/* Start an asynchronous passive open (wait for one connection). */
+static int
+arm(struct mp_sock *s)
+{
+	OSErr err;
+
+	if (s->pending)
+		return 0;
+	memset(&s->ppb, 0, sizeof(s->ppb));
+	s->ppb.ioCRefNum = drv;
+	s->ppb.csCode = TCPPassiveOpen;
+	s->ppb.tcpStream = s->stream;
+	s->ppb.csParam.open.ulpTimeoutValue = 60;
+	s->ppb.csParam.open.ulpTimeoutAction = 1;
+	s->ppb.csParam.open.validityFlags = timeoutValue | timeoutAction;
+	s->ppb.csParam.open.commandTimeoutValue = 0;	/* wait forever */
+	s->ppb.csParam.open.localPort = s->lport;
+	if ((err = PBControlAsync((ParmBlkPtr)&s->ppb)) != noErr)
+		return tcperr(err);
+	s->pending = 1;
+	return 0;
 }
 
 int
-mp_listen(int fd, int n)
+mp_listen(int fd, int backlog)
 {
-	(void)fd;
-	(void)n;
-	errno = EOPNOTSUPP;
-	return -1;
+	struct mp_sock *s;
+
+	(void)backlog;	/* one connection at a time */
+	if ((s = sock(fd)) == NULL)
+		return -1;
+	s->listening = 1;
+	return arm(s);
+}
+
+/* Has the passive open finished?  (>0 yes, 0 not yet) */
+static int
+accept_ready(struct mp_sock *s)
+{
+	if (!s->pending && arm(s) == -1)
+		return 1;	/* report the error through accept() */
+	return s->ppb.ioResult != inProgress;
 }
 
 int
 mp_accept(int fd, struct sockaddr *sa, socklen_t *len)
 {
-	(void)fd;
-	(void)sa;
-	(void)len;
-	errno = EOPNOTSUPP;
-	return -1;
+	struct sockaddr_in sin;
+	struct mp_sock *s, *c;
+	struct mp_fd *f;
+	OSErr err;
+	int cfd;
+
+	if ((s = sock(fd)) == NULL)
+		return -1;
+	if (!s->listening) {
+		errno = EINVAL;
+		return -1;
+	}
+	while (!accept_ready(s)) {
+		if (mp_interrupted) {
+			errno = EINTR;
+			return -1;
+		}
+		mp_yield();
+	}
+	s->pending = 0;
+	if ((err = s->ppb.ioResult) != noErr)
+		return tcperr(err);
+
+	/* The listening stream is now the connection: hand it over. */
+	if ((c = calloc(1, sizeof(*c))) == NULL)
+		return -1;
+	c->stream = s->stream;
+	c->rbuf = s->rbuf;
+	c->connected = 1;
+	c->rhost = s->ppb.csParam.open.remoteHost;
+	c->rport = s->ppb.csParam.open.remotePort;
+	if ((cfd = mp_fdalloc(&f)) == -1) {
+		mp_sock_close(c);
+		return -1;
+	}
+	f->type = MPF_SOCK;
+	f->flags = O_RDWR;
+	f->sock = c;
+
+	/* And give the listener a fresh stream for the next client. */
+	s->stream = NULL;
+	s->rbuf = NULL;
+	if (new_stream(s) == 0)
+		arm(s);
+
+	if (sa != NULL && len != NULL) {
+		memset(&sin, 0, sizeof(sin));
+		sin.sin_len = sizeof(sin);
+		sin.sin_family = AF_INET;
+		sin.sin_port = c->rport;
+		sin.sin_addr.s_addr = c->rhost;
+		if (*len > sizeof(sin))
+			*len = sizeof(sin);
+		memcpy(sa, &sin, *len);
+	}
+	MPTRACE("[accept %d from %lu.%lu.%lu.%lu]\n", cfd,
+	    (unsigned long)(c->rhost >> 24), (unsigned long)(c->rhost >> 16 & 255),
+	    (unsigned long)(c->rhost >> 8 & 255), (unsigned long)(c->rhost & 255));
+	return cfd;
 }
 
+/* Local socket pairs are not supported (yet: local mode needs threads). */
 int
 mp_socketpair(int d, int t, int p, int sv[2])
 {
@@ -477,6 +614,10 @@ mp_poll(struct pollfd *pfd, nfds_t n, int timeout)
 		if (ready || timeout == 0 ||
 		    (timeout > 0 && TickCount() >= deadline))
 			return ready;
+		if (mp_interrupted) {
+			errno = EINTR;
+			return -1;
+		}
 		mp_yield();
 	}
 }

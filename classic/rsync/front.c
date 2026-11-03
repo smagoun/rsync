@@ -39,7 +39,12 @@ int	mp_abspath(const char *, char *);
 
 /* ---- exit() back to the prompt ----------------------------------------- */
 
-static jmp_buf exit_env;
+/*
+ * exit() targets: the command running at the prompt, and inside it any
+ * classic_guarded() call (the daemon serves each connection that way, so
+ * a failing transfer ends that connection, not the daemon).
+ */
+static jmp_buf *exit_target;
 static int exit_status;
 static int in_rsync;
 
@@ -48,10 +53,25 @@ rsync_exit(int status)
 {
 	fflush(stdout);
 	fflush(stderr);
-	if (!in_rsync)
+	if (!in_rsync || exit_target == NULL)
 		exit(status);
 	exit_status = status;
-	longjmp(exit_env, 1);
+	longjmp(*exit_target, 1);
+}
+
+int
+classic_guarded(int (*fn)(void *), void *arg)
+{
+	jmp_buf env, *outer = exit_target;
+	volatile int rc;
+
+	exit_target = &env;
+	if (setjmp(env) == 0)
+		rc = fn(arg);
+	else
+		rc = exit_status;
+	exit_target = outer;
+	return rc;
 }
 
 /* ---- catch abort()/_exit() from deep inside, report, return to prompt -- */
@@ -382,6 +402,14 @@ close_leaked_fds(void)
 		close(fd);
 }
 
+static int run_argc;
+
+static int
+run_main(void *argv)
+{
+	return rsync_main(run_argc, argv);
+}
+
 static int
 run(const char *typed)
 {
@@ -410,16 +438,20 @@ run(const char *typed)
 	 * openrsync expects a fresh process; reset what outlives a run:
 	 * getopt, the verbosity counter and the filter rules.
 	 */
-	optind = 0;
+	run_argc = argc;
+	optreset = 1;		/* BSD getopt (macposix/getopt_long.c) */
+	optind = 1;
 	verbose = 0;
 	rules_reset();
 	mactypes_reset();
 	in_rsync = 1;
-	if (setjmp(exit_env) == 0)
-		rc = rsync_main(argc, argv);
-	else
-		rc = exit_status;
+	mp_interrupted = 0;
+	rc = classic_guarded(run_main, argv);
 	in_rsync = 0;
+	if (mp_interrupted) {
+		printf("rsync: interrupted (Cmd-.)\n");
+		mp_interrupted = 0;
+	}
 	fflush(stdout);
 	fflush(stderr);
 	close_leaked_fds();
@@ -494,6 +526,7 @@ banner(void)
 	printf("  rsync -av --delete server::module/dir \"Macintosh HD:Projects:\"\n");
 	printf("HFS paths (Disk:Folder:) are fine.  $(NAME) comes from "
 	    "\"rsync prefs\".\n");
+	printf("\"rsync --daemon\" serves the modules in \"rsyncd.conf\" (Cmd-. stops).\n");
 	printf("Type \"quit\" to leave.\n\n");
 }
 
