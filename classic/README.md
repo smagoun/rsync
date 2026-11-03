@@ -4,7 +4,17 @@ This is a port of `openrsync/` (Apple's current rsync, protocol 29) to Classic M
 
 ## Using it
 
-The app opens a console window with an `rsync>` prompt.
+There are two applications:
+
+* **rsync**, the windowed app (`classic/gui`):
+  * **rsync Bookmarks:** one window listing your saved syncs, like an FTP client's bookmarks. New… creates one. Double-clicking (or Edit…) opens it for review. Sync runs it, and Preview does a dry run.
+  * **The editor window:** has every option, a Choose… folder button, the equivalent command line, and To Console, which copies that command to the console.
+  * **rsync Console:** the command line, with history on the Up and Down arrows. `help` lists the built-ins: `bookmarks`, `sync NAME`, `preview NAME`, `server on|off`, `set`, `trace`, `clear`, `quit`.
+  * **The server:** starts at launch when an `rsyncd.conf` is next to the app (Server > Start Server at Launch turns that off). A sync started from the GUI pauses the server between connections, and it resumes afterwards.
+  * **Storage:** bookmarks are kept in the text file `rsync Bookmarks` next to the app.
+* **rsync console**, the same engine with only a console window (`classic/rsync`). It's used for scripting and the emulator tests.
+
+At the prompt in either app:
 
 ```
 rsync -av --delete 192.168.1.10::src/MyApp/ "Macintosh HD:Projects:MyApp:"
@@ -71,7 +81,8 @@ netatalk keeps each file's resource fork and Finder info in a `._name` sidecar f
 | Path | What |
 |---|---|
 | `macposix/` | POSIX on the File Manager and MacTCP: paths, descriptors, directories, `rename` that keeps resource forks, sockets/`poll`, the `--netatalk` storage backend, C99 `printf`, stubs |
-| `rsync/` | The application: front end (`front.c`), 68k `config.h`, `SIZE` resource |
+| `gui/` | The windowed application: `app.c` (event loop, menus, run queue, server), `bookmarks.c`, `editor.c`, `console.c`, `glue.c` |
+| `rsync/` | The command engine shared by both apps (`engine.c`), the console app (`front.c`), 68k `config.h`, `SIZE` resource |
 | `../openrsync/netatalk.c` | `--netatalk` mode (the virtual `._name` layer), shared with the Unix build |
 | `../openrsync/hfsname.c` | UTF-8 to HFS names: MacRoman, 31-byte limit with hash-suffixed mangling, `:` to `/`, case collisions |
 | `mptest/`, `nettest/` | Self-tests that run inside Mac OS |

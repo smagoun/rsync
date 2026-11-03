@@ -1,6 +1,18 @@
 # A GUI for rsync on Classic Mac OS
 
-Status: **design proposal.** Nothing here is built yet. Today the app is a console with an `rsync>` prompt (see `classic/README.md`).
+Status: **step 1 built** (`classic/gui`). Decisions from the owner:
+* all bookmarks in one window, like an FTP client's bookmarks, rather than separate documents
+* double-clicking a bookmark opens it for review
+* the server starts at launch, and a preference turns that off
+* the command line stays, with up-arrow history
+
+Built so far:
+* the Bookmarks window, the editor, and the Console with history and built-ins
+* server auto-start, with a pause between connections while a sync runs
+
+Running rsync uses the main loop plus an event hook in `mp_yield()`, not the Thread Manager (§3.2 below).
+
+Not built yet: the progress and preview windows (a preview currently prints itemized lines to the console), the separate Server window, Apple Events, notifications, drag and drop, and password masking. The text below is the original design; where it says "sync set documents", read "bookmarks".
 
 ## 1. What the GUI is for
 
