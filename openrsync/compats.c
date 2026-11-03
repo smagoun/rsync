@@ -2477,7 +2477,12 @@ recallocarray(void *ptr, size_t oldnmemb, size_t newnmemb, size_t size)
 		}
 	}
 
-#if defined(__has_feature) && __has_feature(memory_sanitizer)
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#define OPENRSYNC_MSAN 1
+#endif
+#endif
+#ifdef OPENRSYNC_MSAN
 	newptr = malloc(newsize);
 	if (newptr == NULL)
 		return NULL;

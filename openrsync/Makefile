@@ -22,6 +22,7 @@ OBJS	   = batch.o \
 	     mkpath.o \
 	     mktemp.o \
 	     platform.o \
+	     portable.o \
 	     receiver.o \
 	     rmatch.o \
 	     rules.o \
@@ -48,6 +49,12 @@ ALLOBJS	   = $(OBJS) $(ZLIBOBJS) \
 AFLS	   = afl/test-blk_recv \
 	     afl/test-flist_recv
 
+# FreeBSD provides sbuf(9) and humanize_number(3) in libsbuf/libutil;
+# elsewhere portable.c supplies them.
+UNAME_S	!= uname -s
+LDADD_UTIL_SBUF_FreeBSD = -lutil -lsbuf
+LDADD_UTIL_SBUF = $(LDADD_UTIL_SBUF_$(UNAME_S))
+
 all: openrsync
 
 afl: $(AFLS)
@@ -60,7 +67,7 @@ debug: CFLAGS += -O0 -g3
 debug: openrsync
 
 openrsync: $(ALLOBJS)
-	$(CC) $(LDFLAGS) -o $@ $(ALLOBJS) -lm -lutil -lsbuf $(LDADD_LIB_SOCKET) $(LDADD_SCAN_SCALED)
+	$(CC) $(LDFLAGS) -o $@ $(ALLOBJS) -lm $(LDADD_UTIL_SBUF) $(LDADD_B64_NTOP) $(LDADD_LIB_SOCKET) $(LDADD_SCAN_SCALED)
 
 $(AFLS): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $*.c $(OBJS)

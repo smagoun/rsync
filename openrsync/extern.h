@@ -32,6 +32,9 @@
 #include <fts.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
+
+#include "portable.h"
 
 #include "md4.h"
 

@@ -19,7 +19,9 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #include <libutil.h>
+#endif
 #include <locale.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -31,7 +33,7 @@
 #include <unistd.h>
 #ifdef __APPLE__
 #include <usbuf.h>
-#else
+#elif defined(__FreeBSD__)
 #include <sys/sbuf.h>
 #endif
 #include <sys/param.h>

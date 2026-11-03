@@ -427,12 +427,14 @@ inet_get_any(struct sess *sess, size_t *osz)
 
 		sin = (void *)&curr->sa;
 		memset(sin, 0, sizeof(*sin));
+#ifdef SIN6_LEN
 		sin->sin_len = sizeof(*sin);
+#endif
 		sin->sin_family = AF_INET;
 		sin->sin_port = htons(port);
 		sin->sin_addr.s_addr = INADDR_ANY;
 
-		curr->salen = sin->sin_len;
+		curr->salen = sizeof(*sin);
 	}
 
 	if (ipf_needed == 0 || ipf_needed == 6) {
@@ -443,12 +445,14 @@ inet_get_any(struct sess *sess, size_t *osz)
 
 		sin6 = (void *)&curr->sa;
 		memset(sin6, 0, sizeof(*sin6));
+#ifdef SIN6_LEN
 		sin6->sin6_len = sizeof(*sin6);
+#endif
 		sin6->sin6_family = AF_INET6;
 		sin6->sin6_port = htons(port);
 		sin6->sin6_addr = in6addr_any;
 
-		curr->salen = sin6->sin6_len;
+		curr->salen = sizeof(*sin6);
 	}
 
 	*osz = sz;

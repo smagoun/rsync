@@ -18,7 +18,7 @@
 #include <sys/types.h>
 #ifdef __APPLE__
 #include <usbuf.h>
-#else
+#elif defined(__FreeBSD__)
 #include <sys/sbuf.h>
 #endif
 #include <sys/time.h>
@@ -1227,8 +1227,7 @@ rsync_daemon_handler(struct sess *sess, int fd, struct sockaddr_storage *saddr,
 	if (!daemon_parse_refuse(sess, module))
 		goto fail;
 
-	optreset = 1;
-	optind = 1;
+	PORTABLE_GETOPT_RESET();
 	client_opts = rsync_getopt(argc, argv, &daemon_reject, sess);
 	if (client_opts == NULL)
 		goto fail;	/* Should have been logged. */
@@ -1424,8 +1423,7 @@ rsync_daemon(int argc, char *argv[], struct opts *daemon_opts)
 	 * optind starting at 1, because we're parsing the original program args
 	 * and should skip argv[0].
 	 */
-	optreset = 1;
-	optind = 1;
+	PORTABLE_GETOPT_RESET();
 	while ((c = getopt_long(argc, argv, "46hv", daemon_lopts,
 	    NULL)) != -1) {
 		switch (c) {
