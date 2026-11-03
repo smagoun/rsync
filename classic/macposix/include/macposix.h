@@ -597,4 +597,10 @@ char	*mp_readpassphrase(const char *, char *, size_t, int);
 #define pipe		mp_pipe
 #endif /* !MACPOSIX_IMPL */
 
+/* Older newlib glob.h lacks it (our glob() stub returns it). */
+#include <glob.h>
+#ifndef GLOB_NOMATCH
+#define GLOB_NOMATCH	(-3)
+#endif
+
 #endif /* MACPOSIX_H */

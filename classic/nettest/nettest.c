@@ -42,7 +42,7 @@ static Boolean fileExists(ConstStr255Param name)
 
 static void openLog(void)
 {
-	Str255 name = "\pNetTest Log";
+	const unsigned char *name = "\pNetTest Log";
 
 	FSDelete(name, 0);
 	if (Create(name, 0, 'ttxt', 'TEXT') == noErr)
