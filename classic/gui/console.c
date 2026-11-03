@@ -494,7 +494,7 @@ console_edit(int item)
 		break;
 	case 5:	/* Paste */
 		set_focus(in);
-		TEFromScrap();
+		gui_TEFromScrap();
 		TEPaste(in);
 		return;
 	case 6:	/* Clear */
@@ -506,5 +506,5 @@ console_edit(int item)
 		return;
 	}
 	ZeroScrap();	/* Cut, Copy: publish to the desk scrap */
-	TEToScrap();
+	gui_TEToScrap();
 }

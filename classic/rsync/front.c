@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <Multiverse.h>
+#include "mactoolbox.h"
 
 #include "engine.h"
 

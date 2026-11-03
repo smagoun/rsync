@@ -15,7 +15,7 @@
 #ifndef GUI_H
 #define GUI_H
 
-#include <Multiverse.h>
+#include "mactoolbox.h"
 
 /* ---- bookmarks ---------------------------------------------------------- */
 
@@ -106,6 +106,14 @@ int	ditl_add(Handle, int type, short top, short left, short bottom,
 	    short right, const char *text);	/* returns the item number */
 /* Modal alert built from a DITL: returns the button pressed (1 = OK). */
 int	app_ask(const char *msg, const char *ok, const char *cancel);
+
+/* glue.c: scrap and dialog Edit-menu helpers (Inside Macintosh glue). */
+OSErr	gui_TEFromScrap(void);
+OSErr	gui_TEToScrap(void);
+void	gui_DialogCut(DialogPtr);
+void	gui_DialogCopy(DialogPtr);
+void	gui_DialogPaste(DialogPtr);
+void	gui_DialogDelete(DialogPtr);
 
 /* Pascal string helpers. */
 void	c2p(const char *, Str255);

@@ -21,7 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <Multiverse.h>
+#include "mactoolbox.h"
 
 #include "hfsname.h"
 #include "netatalk.h"

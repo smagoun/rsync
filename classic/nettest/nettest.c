@@ -9,7 +9,7 @@
  * When the file "NetTest AutoQuit" exists, the Mac shuts down afterwards
  * so the test can run unattended from Startup Items.
  */
-#include <Multiverse.h>
+#include "mactoolbox.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>

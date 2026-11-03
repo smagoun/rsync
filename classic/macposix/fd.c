@@ -256,7 +256,7 @@ set_mddat(const struct mp_node *n, unsigned long mddat)
 	if ((err = PBGetCatInfoSync(&pb)) != noErr)
 		return mp_oserr(err);
 	pb.hFileInfo.ioDirID = n->parID;
-	if (pb.hFileInfo.ioFlAttrib & ioDirMask)
+	if (pb.hFileInfo.ioFlAttrib & MP_ATTRIB_DIR)
 		pb.dirInfo.ioDrMdDat = mddat;
 	else
 		pb.hFileInfo.ioFlMdDat = mddat;

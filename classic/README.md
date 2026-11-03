@@ -121,6 +121,8 @@ cmake -S classic -B build-classic \
 make -C build-classic        # build-classic/rsync/rsync.bin (MacBinary) and rsync.dsk
 ```
 
+Retro68 can be built with either header set. The port is developed with the default, the Multiversal Interfaces. Apple's Universal Interfaces are used instead when they're installed in Retro68's `InterfacesAndLibraries` while building it; `macposix/include/mactoolbox.h` picks the right headers for either. If a build with the Universal Interfaces trips on a missing name, rebuilding Retro68 with `--multiversal` is the known-good route.
+
 The Unix build of openrsync, which the host tests use, is `cd openrsync && ./configure && make`. Run it in a copy, because `configure` rewrites the checked-in `config.h`.
 
 ## Testing in QEMU

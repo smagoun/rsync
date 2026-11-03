@@ -1,13 +1,15 @@
 /*
- * glue.c: Toolbox "glue" routines that are library code rather than traps
- * in Apple's interfaces, so the Multiversal headers declare them but no
- * library defines them.  Written from Inside Macintosh.
+ * glue.c: TEFromScrap/TEToScrap and DialogCut/Copy/Paste/Delete, written
+ * from Inside Macintosh.  They're library glue, not traps, and Retro68's
+ * Multiversal headers declare them with nothing behind them.  Our own
+ * names (gui_*) keep them from clashing with Apple's Universal Interfaces,
+ * which do provide them.
  */
-#include <Multiverse.h>
+#include "gui.h"
 
 /* The TextEdit private scrap <-> the desk scrap ('TEXT'). */
-pascal OSErr
-TEFromScrap(void)
+OSErr
+gui_TEFromScrap(void)
 {
 	long off, len;
 	Handle h = LMGetTEScrpHandle();
@@ -23,8 +25,8 @@ TEFromScrap(void)
 	return noErr;
 }
 
-pascal OSErr
-TEToScrap(void)
+OSErr
+gui_TEToScrap(void)
 {
 	Handle h = LMGetTEScrpHandle();
 	long rc;
@@ -44,43 +46,43 @@ dialog_te(DialogPtr d)
 	return ((DialogPeek)d)->editField >= 0 ? ((DialogPeek)d)->textH : NULL;
 }
 
-pascal void
-DialogCut(DialogPtr d)
+void
+gui_DialogCut(DialogPtr d)
 {
 	TEHandle te = dialog_te(d);
 
 	if (te != NULL) {
 		TECut(te);
 		ZeroScrap();
-		TEToScrap();
+		gui_TEToScrap();
 	}
 }
 
-pascal void
-DialogCopy(DialogPtr d)
+void
+gui_DialogCopy(DialogPtr d)
 {
 	TEHandle te = dialog_te(d);
 
 	if (te != NULL) {
 		TECopy(te);
 		ZeroScrap();
-		TEToScrap();
+		gui_TEToScrap();
 	}
 }
 
-pascal void
-DialogPaste(DialogPtr d)
+void
+gui_DialogPaste(DialogPtr d)
 {
 	TEHandle te = dialog_te(d);
 
 	if (te != NULL) {
-		TEFromScrap();
+		gui_TEFromScrap();
 		TEPaste(te);
 	}
 }
 
-pascal void
-DialogDelete(DialogPtr d)
+void
+gui_DialogDelete(DialogPtr d)
 {
 	TEHandle te = dialog_te(d);
 

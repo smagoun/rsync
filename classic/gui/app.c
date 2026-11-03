@@ -347,13 +347,13 @@ do_menu(long choice)
 			break;
 		if (editor_is(front)) {
 			if (item == E_CUT)
-				DialogCut((DialogPtr)front);
+				gui_DialogCut((DialogPtr)front);
 			else if (item == E_COPY)
-				DialogCopy((DialogPtr)front);
+				gui_DialogCopy((DialogPtr)front);
 			else if (item == E_PASTE)
-				DialogPaste((DialogPtr)front);
+				gui_DialogPaste((DialogPtr)front);
 			else if (item == E_CLEAR)
-				DialogDelete((DialogPtr)front);
+				gui_DialogDelete((DialogPtr)front);
 		} else if (console_is(front))
 			console_edit(item);
 		break;
@@ -496,7 +496,7 @@ app_event(EventRecord *ev)
 		/* Suspend/resume: treat as (de)activating the front window. */
 		if (((ev->message >> 24) & 0xFF) == 1 && FrontWindow() != NULL) {
 			if (ev->message & 1)
-				TEFromScrap();
+				gui_TEFromScrap();
 			activate(FrontWindow(), (ev->message & 1) != 0);
 		}
 		break;
@@ -634,7 +634,7 @@ main(void)
 	InitDialogs(NULL);
 	InitCursor();
 	FlushEvents(everyEvent, 0);
-	TEFromScrap();
+	gui_TEFromScrap();
 
 	make_menus();
 	bm_load();

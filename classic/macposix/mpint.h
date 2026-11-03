@@ -7,7 +7,7 @@
 #define MACPOSIX_IMPL 1
 #include "macposix.h"
 
-#include <Multiverse.h>
+#include "mactoolbox.h"
 #include <errno.h>
 
 #include "hfsname.h"
@@ -29,6 +29,12 @@ void	mp_trace(const char *, ...);
 
 /* Set errno from an OSErr and return -1 (or the OSErr if 0 -> 0). */
 int	mp_oserr(OSErr);
+
+/*
+ * ioFlAttrib bit 4: the item is a folder.  Multiversal calls it ioDirMask,
+ * Apple's Universal Interfaces kioFlAttribDirMask; spell it out for both.
+ */
+#define MP_ATTRIB_DIR	0x10
 
 /* Flush and close a resource fork we wrote (fd.c explains why). */
 OSErr	mp_rf_close(short);

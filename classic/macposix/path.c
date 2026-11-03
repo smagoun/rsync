@@ -293,7 +293,7 @@ mp_resolve(int dirfd, const char *path, struct mp_node *n)
 			}
 			if (err != noErr)
 				return mp_oserr(err);
-			if (!(pb.hFileInfo.ioFlAttrib & ioDirMask)) {
+			if (!(pb.hFileInfo.ioFlAttrib & MP_ATTRIB_DIR)) {
 				errno = ENOTDIR;
 				return -1;
 			}
@@ -323,7 +323,7 @@ mp_refresh(struct mp_node *n)
 	if (err != noErr)
 		return mp_oserr(err);
 	n->exists = 1;
-	n->isdir = (n->cat.hFileInfo.ioFlAttrib & ioDirMask) != 0;
+	n->isdir = (n->cat.hFileInfo.ioFlAttrib & MP_ATTRIB_DIR) != 0;
 	if (n->isdir)
 		n->dirID = n->cat.dirInfo.ioDrDirID;
 	/* The catalog has the exact (case-preserved) name. */

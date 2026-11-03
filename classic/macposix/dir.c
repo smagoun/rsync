@@ -70,7 +70,7 @@ hidden(const CInfoPBRec *pb, const Str63 name)
 
 	if (name[0] == 5 && memcmp(name + 1, "Icon\r", 5) == 0)
 		return 1;
-	if (pb->hFileInfo.ioFlAttrib & ioDirMask)
+	if (pb->hFileInfo.ioFlAttrib & MP_ATTRIB_DIR)
 		flags = pb->dirInfo.ioDrUsrWds.frFlags;
 	else
 		flags = pb->hFileInfo.ioFlFndrInfo.fdFlags;
@@ -117,7 +117,7 @@ mp_readdir(DIR *d)
 	dirpath = n->path[0] == '/' ? n->path : n->path;
 	hfs_names_reverse(dirpath, name, d->ent.d_name, sizeof(d->ent.d_name));
 	d->ent.d_namlen = strlen(d->ent.d_name);
-	if (pb.hFileInfo.ioFlAttrib & ioDirMask) {
+	if (pb.hFileInfo.ioFlAttrib & MP_ATTRIB_DIR) {
 		d->ent.d_type = DT_DIR;
 		d->ent.d_ino = (ino_t)pb.dirInfo.ioDrDirID;
 	} else {
