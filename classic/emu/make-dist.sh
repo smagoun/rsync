@@ -33,6 +33,15 @@ Open "rsync" and type a command at the rsync> prompt, for example:
 - Dates shifted by exactly one hour (daylight saving time) count as
   unchanged; --no-dst-window turns that off.
 - Host names work if TCP/IP has a name server configured.
+- "rsync --daemon" makes this Mac a server for other computers: put
+  an "rsyncd.conf" next to the app, e.g.
+      [incoming]
+          path = /Macintosh HD/Incoming
+          read only = no
+          use chroot = no
+  and push from the other machine with
+      rsync -av -E dir/ rsync://<this Mac's address>/incoming/
+  (-E carries resource forks from a Mac running OS X).  Cmd-. stops it.
 - "trace on" logs file and network calls; "set NAME=VALUE" sets an
   environment variable (RSYNC_GMT_OFFSET=seconds pins the time zone);
   "quit" leaves.

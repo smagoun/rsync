@@ -324,7 +324,9 @@ Progress so far:
 | 3 | **Done.** macposix covers files, directories, rename that keeps forks, times, MacTCP sockets, `poll` and MacTCP DNR host names. `hfsname.c` handles names. `mptest` passes 52/52 in QEMU |
 | 4 | **Working in QEMU.** Pull with forks and Finder info, no-op second run, fork-only and data-only updates, replacing files, `--delete`, MacRoman and long names, DST tolerance. Not done: tests on real hardware and on the owner's netatalk server |
 | 5 | **Mostly done.** The prompt, `$(VAR)` from `rsync prefs`, `set`, HFS path arguments, MacRoman console output, `--mac-types` and `--mac-text` work. Not done: profiles, drag and drop, Cmd-. |
-| 6–8 | Not started |
+| 6 | Not started (local/AFP mode) |
+| 7 | **Started, working in QEMU.** `rsync --daemon` on the Mac: one connection at a time, `rsyncd.conf` next to the app, Cmd-. stops it. Pushes from rsync 3.2.7 and openrsync; Apple `-E` accepted, so macOS's stock rsync can push resource forks. Not done: serving pulls *from* the Mac with forks (sender side), the Server window (see `docs/CLASSIC_GUI.md`) |
+| 8 | Not started (TLS) |
 
 
 | Phase | Work | Exit criterion |

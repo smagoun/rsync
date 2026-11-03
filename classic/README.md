@@ -24,6 +24,29 @@ rsync -av --delete $(SRV)::src/MyApp/ :MyApp:
   * `set NAME=VALUE` sets an environment variable. For example, `set RSYNC_GMT_OFFSET=-18000` pins the time zone (seconds east of UTC) for a Mac that never switches to daylight saving time.
   * `quit` leaves the app.
 
+### The Mac as a server (another computer pushes to it)
+
+Type `rsync --daemon` at the prompt. It serves the modules in a text file `rsyncd.conf` next to the app, one connection at a time, until Cmd-. stops it. Folder paths in the config use the POSIX form, `/Disk/Folder`:
+
+```
+[incoming]
+    path = /Macintosh HD/Incoming
+    read only = no
+    use chroot = no
+```
+
+From the other computer:
+
+```bash
+rsync -av --delete dir/ rsync://192.168.1.20/incoming/dir/
+```
+
+* **Resource forks from a Mac running OS X** come across with its stock rsync's `-E` (`--extended-attributes`): `rsync -av -E dir/ rsync://classicmac/incoming/dir/`.
+  * The Mac daemon reads Apple's format and turns the `._name` entries into resource forks and Finder info.
+  * macOS's rsync reports those entries with the data fork's size, so forks are re-checked on every push. Delta transfer keeps that cheap.
+* **From Linux**, a netatalk tree's `._name` files are enough; no option is needed.
+* **Verified in QEMU:** pushes from rsync 3.2.7 and openrsync, `-E` pushes from the Linux build (which now also sends Apple's format), updates, `--delete` and a no-op run.
+
 ### Server setup (Linux + netatalk 4)
 
 Run a stock rsync daemon on the netatalk volume, with a module like this in `rsyncd.conf`:
@@ -53,7 +76,7 @@ netatalk keeps each file's resource fork and Finder info in a `._name` sidecar f
 | `../openrsync/hfsname.c` | UTF-8 to HFS names: MacRoman, 31-byte limit with hash-suffixed mangling, `:` to `/`, case collisions |
 | `mptest/`, `nettest/` | Self-tests that run inside Mac OS |
 | `tests/` | Host tests (`make -C classic/tests check`): `--netatalk` and `--mac-types`/`--mac-text`/`--dst-window` end to end against a stock rsync daemon, name rules, printf |
-| `emu/` | QEMU q800 scripts: boot unattended, run a test app or an rsync script, read the log back with `hfsutils`; `make-dist.sh` packages the app as a 1.44 MB disk image and MacBinary |
+| `emu/` | QEMU q800 scripts (`try-rsync.sh` for a client run, `try-daemon.sh` boots the Mac running the daemon and pushes to it through a forwarded port): boot unattended, run a test app or an rsync script, read the log back with `hfsutils`; `make-dist.sh` packages the app as a 1.44 MB disk image and MacBinary |
 
 ## Building
 
@@ -95,7 +118,5 @@ Also working, in QEMU and in the host tests: host names via MacTCP DNR, `--mac-t
 Not done yet:
 
 * **Local copies** (two Mac paths, e.g. from a mounted AFP volume) need a thread-based server (plan §3.6).
-* **Daemon mode** on the Mac (push from another host) is not implemented.
-* **Cmd-.** to abort a transfer.
 * **Real hardware.** Not yet run on a 68040 or against the owner's netatalk server, and speed has not been measured.
 * **Repeated commands.** Several commands in one session reset getopt, verbosity and filter rules. Other global state in openrsync may still carry over, so if a second command misbehaves, quit and relaunch.
