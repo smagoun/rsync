@@ -19,4 +19,9 @@
 #define utimensat(d, p, t, f)	nt_utimensat((d), (p), (t), (f))
 #define fchmodat(d, p, m, f)	nt_fchmodat((d), (p), (m), (f))
 #define fchownat(d, p, u, g, f)	nt_fchownat((d), (p), (u), (g), (f))
+#define read(f, b, n)		nt_read((f), (b), (n))
+#define pread(f, b, n, o)	nt_pread((f), (b), (n), (o))
+#define write(f, b, n)		nt_write((f), (b), (n))
+#define pwrite(f, b, n, o)	nt_pwrite((f), (b), (n), (o))
+#define close(f)		nt_close(f)
 #endif

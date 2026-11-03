@@ -101,6 +101,10 @@ fmap_mmap_allowed(void)
 #if defined(__MACOS_CLASSIC__)
 	return false;	/* no virtual memory mapping; always use bufio */
 #endif
+#if HAVE_NETATALK
+	if (mac_text_active)
+		return false;	/* reads must go through the LF/CR swap */
+#endif
 #if defined(__APPLE__) && TARGET_OS_WATCH
 	static int allowed = -1;
 

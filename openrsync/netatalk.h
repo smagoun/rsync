@@ -87,6 +87,22 @@ int	nt_utimensat(int, const char *, const struct timespec [2], int);
 int	nt_fchmodat(int, const char *, mode_t, int);
 int	nt_fchownat(int, const char *, uid_t, gid_t, int);
 
+/* --mac-text: LF/CR swapped on read and write of matching files. */
+ssize_t	nt_read(int, void *, size_t);
+ssize_t	nt_pread(int, void *, size_t, off_t);
+ssize_t	nt_write(int, const void *, size_t);
+ssize_t	nt_pwrite(int, const void *, size_t, off_t);
+int	nt_close(int);
+
+/* mactypes.c: --mac-types and --mac-text. */
+extern int mac_types_active;
+extern int mac_text_active;
+int	mactypes_load(const char *);
+void	mactypes_reset(void);
+int	mactypes_lookup(const char *, uint8_t [8]);
+int	mactext_set(const char *);
+int	mactext_match(const char *);
+
 /* Platform hooks used by platform.c when netatalk_active. */
 struct sess;
 struct flist;

@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <arpa/inet.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -297,11 +298,17 @@ test_net(void)
 	CHECK("EOF after the server closes", n == 0);
 	CHECK("close socket", close(s) == 0);
 
-	rc = getaddrinfo("example.com", "873", &hints, &ai);
-	say("     DNS example.com: %s\n", rc == 0 ? "resolved" :
-	    gai_strerror(rc));
-	if (rc == 0)
+	rc = getaddrinfo("github.com", "873", &hints, &ai);
+	if (rc == 0) {
+		inet_ntop(AF_INET, &((struct sockaddr_in *)ai->ai_addr)->sin_addr,
+		    buf, sizeof(buf));
+		say("     github.com -> %s\n", buf);
 		freeaddrinfo(ai);
+	} else
+		say("     github.com: %s\n", gai_strerror(rc));
+	CHECK("DNS lookup via MacTCP DNR", rc == 0);
+	CHECK("unknown name fails cleanly",
+	    getaddrinfo("no-such-host.invalid", "873", &hints, &ai) != 0);
 }
 
 int

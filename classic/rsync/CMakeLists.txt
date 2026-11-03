@@ -5,7 +5,7 @@ set(OPENRSYNC_SOURCES
     ${O}/copy.c ${O}/daemon.c ${O}/daemon_cfg.c ${O}/daemon_misc.c
     ${O}/downloader.c ${O}/fargs.c ${O}/flist.c ${O}/fmap.c ${O}/hardlinks.c
     ${O}/hash.c ${O}/ids.c ${O}/io.c ${O}/log.c ${O}/main.c ${O}/md4.c
-    ${O}/misc.c ${O}/mkpath.c ${O}/mktemp.c ${O}/netatalk.c ${O}/platform.c
+    ${O}/misc.c ${O}/mkpath.c ${O}/mktemp.c ${O}/mactypes.c ${O}/netatalk.c ${O}/platform.c
     ${O}/portable.c ${O}/receiver.c ${O}/rmatch.c ${O}/rules.c ${O}/sender.c
     ${O}/server.c ${O}/session.c ${O}/socket.c ${O}/strmode.c
     ${O}/symlinks.c ${O}/uploader.c

@@ -12,7 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static struct mp_fd console = { MPF_CONSOLE, 1000, O_RDWR, 0, NULL, 0, NULL };
+static struct mp_fd console = {
+	.type = MPF_CONSOLE, .refs = 1000, .flags = O_RDWR
+};
 static struct mp_fd *fds[MP_OPEN_MAX] = { &console, &console, &console };
 
 /* Pending modification dates per open file (applied on close). */
@@ -284,13 +286,17 @@ mp_close(int fd)
 		return 0;
 	}
 	if (f->type == MPF_FILE) {
-		err = FSClose(f->refNum);
-		for (i = 0; i < MP_OPEN_MAX; i++)
-			if (pend[i].refNum == f->refNum && pend[i].mddat) {
-				set_mddat(f->node, pend[i].mddat);
-				pend[i].refNum = 0;
-				pend[i].mddat = 0;
-			}
+		/* A detached path was already closed by a rename. */
+		if (!f->detached) {
+			err = FSClose(f->refNum);
+			for (i = 0; i < MP_OPEN_MAX; i++)
+				if (pend[i].refNum == f->refNum &&
+				    pend[i].mddat) {
+					set_mddat(f->node, pend[i].mddat);
+					pend[i].refNum = 0;
+					pend[i].mddat = 0;
+				}
+		}
 		if (f->delete_on_close) {
 			mp_node_spec(f->node, &spec);
 			FSpDelete(&spec);
@@ -324,6 +330,10 @@ mp_read(int fd, void *buf, size_t len)
 	default:
 		break;
 	}
+	if (f->detached) {
+		errno = EBADF;
+		return -1;
+	}
 	if (len == 0)
 		return 0;
 	err = FSRead(f->refNum, &cnt, buf);
@@ -352,7 +362,7 @@ mp_write(int fd, const void *buf, size_t len)
 	default:
 		break;
 	}
-	if ((f->flags & O_ACCMODE) == O_RDONLY) {
+	if ((f->flags & O_ACCMODE) == O_RDONLY || f->detached) {
 		errno = EBADF;
 		return -1;
 	}
@@ -374,7 +384,7 @@ mp_pread(int fd, void *buf, size_t len, off_t off)
 
 	if ((f = mp_fdget(fd)) == NULL)
 		return -1;
-	if (f->type != MPF_FILE) {
+	if (f->type != MPF_FILE || f->detached) {
 		errno = ESPIPE;
 		return -1;
 	}
@@ -395,7 +405,7 @@ mp_pwrite(int fd, const void *buf, size_t len, off_t off)
 
 	if ((f = mp_fdget(fd)) == NULL)
 		return -1;
-	if (f->type != MPF_FILE) {
+	if (f->type != MPF_FILE || f->detached) {
 		errno = ESPIPE;
 		return -1;
 	}
@@ -416,7 +426,7 @@ mp_lseek(int fd, off_t off, int whence)
 
 	if ((f = mp_fdget(fd)) == NULL)
 		return -1;
-	if (f->type != MPF_FILE) {
+	if (f->type != MPF_FILE || f->detached) {
 		errno = ESPIPE;
 		return -1;
 	}
@@ -462,7 +472,7 @@ mp_ftruncate(int fd, off_t len)
 
 	if ((f = mp_fdget(fd)) == NULL)
 		return -1;
-	if (f->type != MPF_FILE) {
+	if (f->type != MPF_FILE || f->detached) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -509,7 +519,8 @@ mp_fstat(int fd, struct stat *st)
 	if (mp_refresh(f->node) == -1)
 		return -1;
 	mp_cat_to_stat(f->node, st);
-	if (f->type == MPF_FILE && GetEOF(f->refNum, &eof) == noErr)
+	if (f->type == MPF_FILE && !f->detached &&
+	    GetEOF(f->refNum, &eof) == noErr)
 		st->st_size = eof;
 	return 0;
 }
@@ -548,11 +559,34 @@ mp_fd_for_node(const struct mp_node *n)
 
 	for (i = 3; i < MP_OPEN_MAX; i++)
 		if (fds[i] != NULL && fds[i]->type == MPF_FILE &&
+		    !fds[i]->detached &&
 		    fds[i]->node->vRefNum == n->vRefNum &&
 		    fds[i]->node->parID == n->parID &&
 		    hfs_name_equal(fds[i]->node->name, n->name))
 			return i;
 	return -1;
+}
+
+/*
+ * Close the HFS access paths we hold on node n (rename/replace cannot
+ * work on an open file the way POSIX allows).  Pending dates are applied;
+ * the descriptors stay valid for close() but no longer do I/O.
+ */
+void
+mp_fd_detach_node(const struct mp_node *n)
+{
+	int fd, i;
+
+	while ((fd = mp_fd_for_node(n)) != -1) {
+		FSClose(fds[fd]->refNum);
+		for (i = 0; i < MP_OPEN_MAX; i++)
+			if (pend[i].refNum == fds[fd]->refNum && pend[i].mddat) {
+				set_mddat(fds[fd]->node, pend[i].mddat);
+				pend[i].refNum = 0;
+				pend[i].mddat = 0;
+			}
+		fds[fd]->detached = 1;
+	}
 }
 
 /* ---- dup, fcntl ------------------------------------------------------ */

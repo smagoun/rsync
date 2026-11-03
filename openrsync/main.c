@@ -947,6 +947,10 @@ enum {
 	OP_EXECUTABILITY,
 	OP_NETATALK,
 	OP_NO_NETATALK,
+	OP_MAC_TYPES,
+	OP_MAC_TEXT,
+	OP_DST_WINDOW,
+	OP_NO_DST_WINDOW,
 	OP_LISTONLY,
 	OP_PFLISTSZ,
 
@@ -998,6 +1002,12 @@ const struct option	 rsync_lopts[] = {
 #if HAVE_NETATALK
     { "netatalk",	no_argument,	NULL,			OP_NETATALK },
     { "no-netatalk",	no_argument,	NULL,			OP_NO_NETATALK },
+    { "mac-types",	optional_argument, NULL,		OP_MAC_TYPES },
+    { "mac-text",	optional_argument, NULL,		OP_MAC_TEXT },
+#endif
+    { "dst-window",	no_argument,	NULL,			OP_DST_WINDOW },
+    { "no-dst-window",	no_argument,	NULL,			OP_NO_DST_WINDOW },
+#if HAVE_NETATALK
 #endif
     { "existing",	no_argument, NULL,			OP_IGNORE_NON_EXISTING },
 #ifdef __APPLE__
@@ -1267,6 +1277,22 @@ rsync_getopt(int argc, char *argv[], rsync_option_filter *filter,
 		case OP_NO_NETATALK:
 			netatalk_active = 0;
 			break;
+		case OP_MAC_TYPES:
+			if (mactypes_load(optarg) == -1)
+				return NULL;
+			break;
+		case OP_MAC_TEXT:
+			if (mactext_set(optarg) == -1)
+				return NULL;
+			break;
+#endif
+		case OP_DST_WINDOW:
+			opts.dst_window = 1;
+			break;
+		case OP_NO_DST_WINDOW:
+			opts.dst_window = -1;
+			break;
+#if HAVE_NETATALK
 #endif
 		case OP_EXECUTABILITY:
 			opts.preserve_executability = 1;
@@ -2025,6 +2051,9 @@ main(int argc, char *argv[])
 #ifdef __MACOS_CLASSIC__
 	/* Pass UTF-8 names through; the console converts them to MacRoman. */
 	opts.bit8 = 1;
+	/* HFS dates are local time: tolerate DST shifts unless told not to. */
+	if (opts.dst_window == 0)
+		opts.dst_window = 1;
 #endif
 
 	argc -= optind;

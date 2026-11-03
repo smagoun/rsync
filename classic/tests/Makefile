@@ -15,6 +15,7 @@ check: hfsname_test printf_test
 	./hfsname_test
 	./printf_test
 	./netatalk_test.sh $(OPENRSYNC)
+	./macopts_test.sh $(OPENRSYNC)
 
 clean:
 	rm -f hfsname_test printf_test

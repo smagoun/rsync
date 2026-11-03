@@ -15,7 +15,14 @@ rsync -av --delete $(SRV)::src/MyApp/ :MyApp:
 * **Local side:** an HFS path (`Disk:Folder:`, or `:Folder:` relative to the app). A trailing colon means "the folder's contents", like a trailing `/` in rsync.
 * **`$(NAME)`:** taken from a text file `rsync prefs` next to the app, which holds lines like `SRV = 192.168.1.10`.
 * **Resource forks:** on by default (`--netatalk`), described below. Turn off with `--no-netatalk`.
-* **Debugging:** `trace on` / `trace off` logs every file and network call. `quit` leaves the app.
+* **`--mac-types[=FILE]`:** files that arrive without a `._` sidecar get a type and creator chosen by name. The built-in table maps source/text files to `TEXT/ttxt` (SimpleText), `.rsrc` to `rsrc/RSED`, and so on. FILE adds or overrides entries, one per line: `.c TEXT KAHL` (THINK C), `Makefile TEXT MPS ` or `README TEXT R*ch`. A sidecar's own Finder info always wins.
+* **`--mac-text[=EXTS]`:** files with these extensions are stored with Mac (CR) line endings. The default list is `.c .h .cp .cpp .cc .hpp .r .p .pas .a .s .asm .txt .make .mk`; give your own as `--mac-text=.c,.h,.r`. LF and CR are swapped as bytes, so rsync still sees the server's exact contents: unchanged files are skipped, `--checksum` agrees, and changes go as deltas. A file with CRLF ends up with LF-CR on the Mac and round-trips exactly. Off by default.
+* **DST:** HFS dates are local time, so when daylight saving time starts or ends every local date shifts by an hour. A file whose size matches and whose date is off by exactly one hour (± `--modify-window`) is treated as unchanged. On by default in the Mac build; `--no-dst-window` turns it off. On Unix, `--dst-window` turns it on.
+* **Host names** are looked up through the `MacTCP DNR` resolver in the System Folder (TCP/IP control panel's name server).
+* **Built-in commands:**
+  * `trace on` / `trace off` logs every file and network call.
+  * `set NAME=VALUE` sets an environment variable. For example, `set RSYNC_GMT_OFFSET=-18000` pins the time zone (seconds east of UTC) for a Mac that never switches to daylight saving time.
+  * `quit` leaves the app.
 
 ### Server setup (Linux + netatalk 4)
 
@@ -45,8 +52,8 @@ netatalk keeps each file's resource fork and Finder info in a `._name` sidecar f
 | `../openrsync/netatalk.c` | `--netatalk` mode (the virtual `._name` layer), shared with the Unix build |
 | `../openrsync/hfsname.c` | UTF-8 to HFS names: MacRoman, 31-byte limit with hash-suffixed mangling, `:` to `/`, case collisions |
 | `mptest/`, `nettest/` | Self-tests that run inside Mac OS |
-| `tests/` | Host tests (`make -C classic/tests check`): `--netatalk` end to end against a stock rsync daemon, name rules, printf |
-| `emu/` | QEMU q800 scripts: boot unattended, run a test app or an rsync script, read the log back with `hfsutils` |
+| `tests/` | Host tests (`make -C classic/tests check`): `--netatalk` and `--mac-types`/`--mac-text`/`--dst-window` end to end against a stock rsync daemon, name rules, printf |
+| `emu/` | QEMU q800 scripts: boot unattended, run a test app or an rsync script, read the log back with `hfsutils`; `make-dist.sh` packages the app as a 1.44 MB disk image and MacBinary |
 
 ## Building
 
@@ -83,11 +90,10 @@ Working in QEMU q800 with Mac OS 8.1, against rsync 3.2.7:
 * `--delete`
 * MacRoman and long file names
 
+Also working, in QEMU and in the host tests: host names via MacTCP DNR, `--mac-types`, `--mac-text`, and DST tolerance (checked on the Mac by shifting the clock an hour with `set RSYNC_GMT_OFFSET`).
+
 Not done yet:
 
-* **Host names.** The MacTCP DNR resolver doesn't load yet, so use IP addresses.
-* **DST.** No tolerance yet for the one-hour shift after a change: plan §4.2 calls for treating a difference of exactly ±3600 s, with equal size, as unchanged.
-* **`--mac-types` and `--mac-text`** (type/creator mapping and CR/LF translation; plan §4.4).
 * **Local copies** (two Mac paths, e.g. from a mounted AFP volume) need a thread-based server (plan §3.6).
 * **Daemon mode** on the Mac (push from another host) is not implemented.
 * **Cmd-.** to abort a transfer.

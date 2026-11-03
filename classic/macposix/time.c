@@ -28,24 +28,22 @@ static long
 gmt_offset(void)
 {
 	static int have;
-	static long off;
+	static long loc_off;
 	unsigned char loc[12];
 	const char *env;
 	long d;
 
-	if (have)
-		return off;
-	if ((env = getenv("RSYNC_GMT_OFFSET")) != NULL && *env != '\0') {
-		off = strtol(env, NULL, 10);
-	} else {
+	if ((env = getenv("RSYNC_GMT_OFFSET")) != NULL && *env != '\0')
+		return strtol(env, NULL, 10);
+	if (!have) {
 		read_location(loc);
 		d = ((long)loc[9] << 16) | ((long)loc[10] << 8) | loc[11];
 		if (d & 0x800000)
 			d |= ~0xFFFFFFL;
-		off = d;
+		loc_off = d;
+		have = 1;
 	}
-	have = 1;
-	return off;
+	return loc_off;
 }
 
 time_t

@@ -62,7 +62,7 @@ static struct {
 	Str63	name;
 } rcache;
 
-static void
+void
 rcache_close(void)
 {
 	if (rcache.refNum) {

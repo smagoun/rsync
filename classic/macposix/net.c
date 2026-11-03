@@ -545,34 +545,48 @@ dnr_done(struct hostInfo *hi, char *user)
 	*(volatile int *)user = 1;
 }
 
+/* Why the resolver could not be loaded (shown by gai_strerror). */
+static char dnr_why[96];
+
+static int
+dnr_fail(const char *step, long err)
+{
+	snprintf(dnr_why, sizeof(dnr_why), "MacTCP DNR: %s failed (%ld)", step,
+	    err);
+	return -1;
+}
+
 static int
 dnr_open(void)
 {
 	Handle h;
 	short vref, ref;
-	long dirid;
+	long dirid, rc;
+	OSErr err;
 
 	if (dnr != NULL)
 		return 0;
 	if (open_driver() == -1)
-		return -1;
-	if (FindFolder(kOnSystemDisk, kSystemFolderType, kDontCreateFolder,
-	    &vref, &dirid) != noErr)
-		return -1;
+		return dnr_fail("opening .IPP", 0);
+	if ((err = FindFolder(kOnSystemDisk, kSystemFolderType,
+	    kDontCreateFolder, &vref, &dirid)) != noErr)
+		return dnr_fail("FindFolder", err);
 	if ((ref = HOpenResFile(vref, dirid, "\pMacTCP DNR", fsRdPerm)) == -1)
-		return -1;
+		return dnr_fail("opening System Folder:MacTCP DNR", ResError());
 	h = Get1IndResource('dnrp', 1);
 	if (h == NULL) {
+		err = ResError();
 		CloseResFile(ref);
-		return -1;
+		return dnr_fail("loading 'dnrp' resource", err);
 	}
 	DetachResource(h);
 	CloseResFile(ref);
 	HLock(h);
 	dnr = (dnr_proc)*h;
-	if (dnr(DNR_OPEN, NULL) != noErr) {
+	/* The resolver returns a 16-bit OSErr in D0; the high word is junk. */
+	if ((rc = (short)dnr(DNR_OPEN, NULL)) != noErr) {
 		dnr = NULL;
-		return -1;
+		return dnr_fail("OpenResolver", rc);
 	}
 	return 0;
 }
@@ -587,8 +601,8 @@ dnr_lookup(const char *name, in_addr_t *addr)
 	if (dnr_open() == -1)
 		return EAI_FAIL;
 	memset(&hi, 0, sizeof(hi));
-	hi.rtnCode = dnr(DNR_STRTOADDR, name, &hi, dnr_done, (char *)&done);
-	if (hi.rtnCode == cacheFault) {
+	if ((short)dnr(DNR_STRTOADDR, name, &hi, dnr_done, (char *)&done) ==
+	    cacheFault) {
 		start = TickCount();
 		while (!done && TickCount() - start < 60 * 30)
 			mp_yield();
@@ -666,7 +680,8 @@ mp_gai_strerror(int e)
 	case EAI_NONAME:
 		return "host name not found (check TCP/IP and DNS settings)";
 	case EAI_FAIL:
-		return "name resolver (MacTCP DNR) unavailable";
+		return dnr_why[0] ? dnr_why :
+		    "name resolver (MacTCP DNR) unavailable";
 	case EAI_SERVICE:
 		return "unknown service";
 	case EAI_FAMILY:

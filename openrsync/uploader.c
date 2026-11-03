@@ -1435,6 +1435,19 @@ check_file(int rootfd, struct flist *f, struct stat *st,
 						f->path);
 				return 0;
 			}
+			/*
+			 * --dst-window: a clock that keeps local time (HFS)
+			 * shifts every date by an hour when daylight saving
+			 * time starts or ends.  Same size, exactly an hour
+			 * apart: treat as unchanged.
+			 */
+			if (sess->opts->dst_window > 0 &&
+			    labs(labs(f->st.mtime - st->st_mtime) - 3600) <=
+			    sess->opts->modwin) {
+				LOG2("%s: differs by one hour (DST), unchanged",
+				    f->path);
+				return 0;
+			}
 			return 1;
 		}
 	}

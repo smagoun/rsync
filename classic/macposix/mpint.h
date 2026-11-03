@@ -69,6 +69,7 @@ struct mp_fd {
 	short		 refNum;	/* MPF_FILE */
 	struct mp_node	*node;		/* MPF_FILE, MPF_DIR */
 	int		 delete_on_close; /* mp_tmpfd() */
+	int		 detached;	/* HFS path closed by rename */
 	struct mp_sock	*sock;		/* MPF_SOCK */
 };
 

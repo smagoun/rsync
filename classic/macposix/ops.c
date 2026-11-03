@@ -9,6 +9,8 @@
 void	mp_dircache_flush(void);
 int	mp_fd_pending_mtime(int, unsigned long);
 int	mp_fd_for_node(const struct mp_node *);
+void	mp_fd_detach_node(const struct mp_node *);
+void	rcache_close(void);	/* meta.c: cached open resource fork */
 
 static int
 lookup(int dirfd, const char *path, struct mp_node *n)
@@ -122,6 +124,7 @@ mp_unlinkat(int dirfd, const char *path, int flags)
 		errno = ENOTDIR;
 		return -1;
 	}
+	rcache_close();
 	mp_node_spec(&n, &spec);
 	err = FSpDelete(&spec);
 	if (err == fBsyErr && n.isdir) {
@@ -165,9 +168,12 @@ copy_rsrc(const FSSpec *from, const FSSpec *to)
 	long len, done, cnt;
 	OSErr err;
 
-	if ((err = FSpOpenRF(from, fsRdPerm, &in)) != noErr)
+	if ((err = FSpOpenRF(from, fsRdPerm, &in)) != noErr) {
+		MPTRACE("[copy_rsrc: open src %d]\n", err);
 		return mp_oserr(err);
+	}
 	if ((err = FSpOpenRF(to, fsRdWrPerm, &out)) != noErr) {
+		MPTRACE("[copy_rsrc: open dst %d]\n", err);
 		FSClose(in);
 		return mp_oserr(err);
 	}
@@ -204,12 +210,18 @@ replace_file(struct mp_node *from, struct mp_node *to)
 	mp_node_spec(to, &ts);
 	mddat = from->cat.hFileInfo.ioFlMdDat;
 	if (to->cat.hFileInfo.ioFlRLgLen > 0 &&
-	    copy_rsrc(&ts, &fs) == -1)
+	    copy_rsrc(&ts, &fs) == -1) {
+		MPTRACE("[replace: copy_rsrc errno %d]\n", errno);
 		return -1;
-	if ((err = FSpExchangeFiles(&fs, &ts)) != noErr)
+	}
+	err = FSpExchangeFiles(&fs, &ts);
+	MPTRACE("[replace: exchange %d]\n", err);
+	if (err != noErr)
 		return mp_oserr(err);
 	/* `from` now holds the old contents. */
-	if ((err = FSpDelete(&fs)) != noErr)
+	err = FSpDelete(&fs);
+	MPTRACE("[replace: delete old %d]\n", err);
+	if (err != noErr)
 		return mp_oserr(err);
 	if (mp_refresh(to) == -1)
 		return -1;
@@ -237,6 +249,23 @@ mp_renameat(int ofd, const char *opath, int nfd, const char *npath)
 	if (from.vRefNum != to.vRefNum) {
 		errno = EXDEV;
 		return -1;
+	}
+	/* No open resource fork of ours may block the File Manager. */
+	rcache_close();
+	/*
+	 * rsync renames temp files it still holds open, and may still hold
+	 * the file being replaced open as its delta basis (finished with by
+	 * now).  HFS will not swap or delete open files: close our paths.
+	 */
+	if (!from.isdir) {
+		mp_fd_detach_node(&from);
+		if (mp_refresh(&from) == -1)
+			return -1;
+	}
+	if (to.exists && !to.isdir) {
+		mp_fd_detach_node(&to);
+		if (mp_refresh(&to) == -1)
+			return -1;
 	}
 	if (to.exists) {
 		if (from.parID == to.parID &&

@@ -32,6 +32,7 @@
 
 int	rsync_main(int, char *[]);
 void	rules_reset(void);
+void	mactypes_reset(void);
 extern int verbose;
 void	rsync_exit(int) __attribute__((noreturn));
 int	mp_abspath(const char *, char *);
@@ -412,6 +413,7 @@ run(const char *typed)
 	optind = 0;
 	verbose = 0;
 	rules_reset();
+	mactypes_reset();
 	in_rsync = 1;
 	if (setjmp(exit_env) == 0)
 		rc = rsync_main(argc, argv);
@@ -438,6 +440,35 @@ classic_register_names(const char *root, const struct flist *fl,
 	    const struct flist *, size_t);
 
 	classic_register_names_impl(root, fl, flsz);
+}
+
+/* ---- built-in commands ---------------------------------------------------- */
+
+/*
+ * "trace on|off" and "set NAME=VALUE" (environment, e.g. RSYNC_GMT_OFFSET).
+ * Returns 1 if the line was one of these.
+ */
+static int
+builtin(const char *line)
+{
+	char name[64];
+	const char *eq;
+
+	if (strncmp(line, "trace ", 6) == 0) {
+		mp_tracing = strcmp(line + 6, "on") == 0;
+		return 1;
+	}
+	if (strncmp(line, "set ", 4) == 0 && (eq = strchr(line, '=')) != NULL &&
+	    (size_t)(eq - line - 4) < sizeof(name)) {
+		memcpy(name, line + 4, eq - line - 4);
+		name[eq - line - 4] = '\0';
+		if (eq[1] == '\0')
+			unsetenv(name);
+		else
+			setenv(name, eq + 1, 1);
+		return 1;
+	}
+	return 0;
 }
 
 /* ---- main ------------------------------------------------------------------ */
@@ -485,10 +516,8 @@ main(void)
 			if (line[0] == '\0' || line[0] == '#')
 				continue;
 			printf("rsync> %s\n", line);
-			if (strncmp(line, "trace ", 6) == 0) {
-				mp_tracing = strcmp(line + 6, "on") == 0;
+			if (builtin(line))
 				continue;
-			}
 			rc = run(line);
 			printf("[exit %d]\n", rc);
 		}
@@ -510,10 +539,8 @@ main(void)
 			line[--len] = '\0';
 		if (strcmp(line, "quit") == 0 || strcmp(line, "exit") == 0)
 			break;
-		if (strncmp(line, "trace ", 6) == 0) {
-			mp_tracing = strcmp(line + 6, "on") == 0;
+		if (builtin(line))
 			continue;
-		}
 		rc = run(line);
 		if (rc != 0)
 			printf("[exit %d]\n", rc);

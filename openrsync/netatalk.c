@@ -226,6 +226,8 @@ scratch_fd(void)
 #endif
 }
 
+static void mark_text_fd(int, int);
+
 /* Build the packed AppleDouble in an anonymous temporary file. */
 static int
 open_packed(int dirfd, const char *base)
@@ -272,14 +274,18 @@ nt_openat(int dirfd, const char *path, int flags, ...)
 	char base[PATH_MAX];
 	mode_t mode = 0;
 	va_list ap;
+	int fd;
 
 	if (flags & O_CREAT) {
 		va_start(ap, flags);
 		mode = (mode_t)va_arg(ap, int);
 		va_end(ap);
 	}
-	if (!virtual(path))
-		return openat(dirfd, path, flags, mode);
+	if (!virtual(path)) {
+		fd = openat(dirfd, path, flags, mode);
+		mark_text_fd(fd, fd != -1 && mactext_match(path));
+		return fd;
+	}
 	if ((flags & O_ACCMODE) != O_RDONLY) {
 		/* Sidecars are only ever written via temp files. */
 		errno = EPERM;
@@ -352,9 +358,13 @@ basename_of(const char *path)
 	return b == NULL ? path : b + 1;
 }
 
+/* flist flag: this regular file has a "._" sidecar in the list. */
+#define NT_HAS_SIDECAR	FLSTAT_PLATFORM_BIT1
+
 /*
  * After the file list arrives, put each "foo" before its "._foo" so the
- * base exists when the sidecar is unpacked (rsync sorts "._foo" first).
+ * base exists when the sidecar is unpacked (rsync sorts "._foo" first),
+ * and mark the bases that have one.
  */
 void
 netatalk_flist_received(struct sess *sess, struct flist *fl, size_t flsz)
@@ -376,44 +386,48 @@ netatalk_flist_received(struct sess *sess, struct flist *fl, size_t flsz)
 			temp = fl[j];
 			fl[j] = fl[i];
 			fl[i] = temp;
+			fl[i].st.flags |= NT_HAS_SIDECAR;	/* the base */
 			break;
 		}
 	}
-
 }
 
 /*
  * A regular file with no "._foo" on the server must have no resource fork
- * or Finder info locally either: clear any it has.  Called by the receiver
- * once the destination root is open (rootfd).
+ * locally either, and blank Finder info, or with --mac-types the type and
+ * creator its name maps to.  Called by the receiver once the destination
+ * root is open (rootfd); files that do not exist yet are handled when
+ * they arrive (netatalk_move_file).
  */
 void
 netatalk_clear_stale(struct sess *sess, int rootfd, struct flist *fl,
     size_t flsz)
 {
+	uint8_t want[AD_FINDERI_LEN];
 	struct nt_meta m;
-	size_t i, j;
-	const char *b;
-	char side[PATH_MAX];
-	int found;
+	size_t i;
+	int mapped;
 
 	if (!netatalk_active || rootfd == -1 || sess->opts->dry_run)
 		return;
 	for (i = 0; i < flsz; i++) {
-		if (!S_ISREG(fl[i].st.mode) || netatalk_is_sidecar(fl[i].path))
+		if (!S_ISREG(fl[i].st.mode) || netatalk_is_sidecar(fl[i].path) ||
+		    (fl[i].st.flags & NT_HAS_SIDECAR))
 			continue;
-		b = basename_of(fl[i].path);
-		if (snprintf(side, sizeof(side), "%.*s._%s",
-		    (int)(b - fl[i].path), fl[i].path, b) >= (int)sizeof(side))
+		if (ntb_get(rootfd, fl[i].path, &m) == -1)
 			continue;
-		found = 0;
-		for (j = 0; j < flsz && !found; j++)
-			found = strcmp(fl[j].path, side) == 0;
-		if (found)
+		memset(want, 0, sizeof(want));
+		mapped = mactypes_lookup(fl[i].path, want);
+		if (m.rsrc_len == 0 && (mapped ?
+		    memcmp(m.finfo, want, 8) == 0 : !meta_present(&m)))
 			continue;
-		if (ntb_get(rootfd, fl[i].path, &m) == -1 ||
-		    !meta_present(&m))
+		if (mapped) {
+			LOG1("%s: setting type/creator %.4s/%.4s", fl[i].path,
+			    (char *)want, (char *)want + 4);
+			if (ntb_set(rootfd, fl[i].path, want, -1, 0, 0, 0) == -1)
+				ERR("%s: set type/creator", fl[i].path);
 			continue;
+		}
 		LOG1("%s: clearing resource fork and Finder info",
 		    fl[i].path);
 		if (ntb_clear(rootfd, fl[i].path) == -1)
@@ -471,11 +485,122 @@ netatalk_move_file(const struct sess *sess, struct flist *fl, int fromfd,
 {
 	if (final && netatalk_is_sidecar(toname))
 		return unpack(sess, fl, fromfd, fname, tofd, toname);
+	uint8_t want[AD_FINDERI_LEN];
+
 	if (move_file(fromfd, fname, tofd, toname, final, skip_metadata) != 0) {
 		ERR("%s: move_file: %s", fname, toname);
 		return 0;
 	}
+	/* A plain file without a sidecar: --mac-types names its type. */
+	memset(want, 0, sizeof(want));
+	if (final && S_ISREG(fl->st.mode) && !(fl->st.flags & NT_HAS_SIDECAR) &&
+	    mactypes_lookup(toname, want) &&
+	    ntb_set(tofd, toname, want, -1, 0, 0, 0) == -1)
+		ERR("%s: set type/creator", toname);
 	return 1;
+}
+
+/* ---------------------------------------------------------------------
+ * --mac-text: swap LF and CR in the data of matching files (mactypes.c)
+ */
+
+#define TEXT_FD_MAX	4096
+static unsigned char text_fd[TEXT_FD_MAX / 8];
+
+static int
+is_text_fd(int fd)
+{
+	return fd >= 0 && fd < TEXT_FD_MAX &&
+	    (text_fd[fd / 8] & (1 << (fd % 8)));
+}
+
+static void
+mark_text_fd(int fd, int on)
+{
+	if (fd < 0 || fd >= TEXT_FD_MAX)
+		return;
+	if (on)
+		text_fd[fd / 8] |= 1 << (fd % 8);
+	else
+		text_fd[fd / 8] &= ~(1 << (fd % 8));
+}
+
+static void
+swap_eol(void *buf, size_t len)
+{
+	unsigned char *p = buf;
+	size_t i;
+
+	for (i = 0; i < len; i++)
+		if (p[i] == '\n')
+			p[i] = '\r';
+		else if (p[i] == '\r')
+			p[i] = '\n';
+}
+
+ssize_t
+nt_read(int fd, void *buf, size_t len)
+{
+	ssize_t n = read(fd, buf, len);
+
+	if (n > 0 && is_text_fd(fd))
+		swap_eol(buf, (size_t)n);
+	return n;
+}
+
+ssize_t
+nt_pread(int fd, void *buf, size_t len, off_t off)
+{
+	ssize_t n = pread(fd, buf, len, off);
+
+	if (n > 0 && is_text_fd(fd))
+		swap_eol(buf, (size_t)n);
+	return n;
+}
+
+static ssize_t
+write_swapped(int fd, const void *buf, size_t len, off_t off, int positional)
+{
+	char tmp[8192];
+	size_t done = 0, chunk;
+	ssize_t w;
+
+	while (done < len) {
+		chunk = len - done < sizeof(tmp) ? len - done : sizeof(tmp);
+		memcpy(tmp, (const char *)buf + done, chunk);
+		swap_eol(tmp, chunk);
+		w = positional ? pwrite(fd, tmp, chunk, off + (off_t)done) :
+		    write(fd, tmp, chunk);
+		if (w <= 0)
+			return done > 0 ? (ssize_t)done : w;
+		done += (size_t)w;
+		if ((size_t)w < chunk)
+			break;
+	}
+	return (ssize_t)done;
+}
+
+ssize_t
+nt_write(int fd, const void *buf, size_t len)
+{
+	if (!is_text_fd(fd))
+		return write(fd, buf, len);
+	return write_swapped(fd, buf, len, 0, 0);
+}
+
+ssize_t
+nt_pwrite(int fd, const void *buf, size_t len, off_t off)
+{
+	if (!is_text_fd(fd))
+		return pwrite(fd, buf, len, off);
+	return write_swapped(fd, buf, len, off, 1);
+}
+
+int
+nt_close(int fd)
+{
+	mark_text_fd(fd, 0);
+	return close(fd);
 }
 
 #endif /* HAVE_NETATALK */

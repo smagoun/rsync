@@ -570,6 +570,7 @@ struct	opts {
 	int		 ignore_errors;		/* --ignore-errors */
 	int		 preserve_executability;	/* --executability */
 	int		 modwin;		/* --modify-windows=sec */
+	int		 dst_window;		/* --[no-]dst-window: 1 on, -1 off */
 	int		 fuzzy_basis;		/* -y */
 	long		 max_delete;		/* --max-delete */
 #ifdef __APPLE__
