@@ -12,7 +12,7 @@ set(OPENRSYNC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../openrsync)
 add_library(macposix STATIC
     macposix/path.c macposix/fd.c macposix/ops.c macposix/dir.c
     macposix/meta.c macposix/net.c macposix/misc.c macposix/time.c
-    macposix/printf.c macposix/getopt_long.c
+    macposix/printf.c macposix/getopt_long.c macposix/hsearch.c
     ${OPENRSYNC_DIR}/hfsname.c)
 target_include_directories(macposix PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/macposix/include

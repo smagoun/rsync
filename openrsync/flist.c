@@ -2701,6 +2701,8 @@ flist_gen_dels(struct sess *sess, const char *root, struct flist **fl,
 	size_t		  cargvs = 0, skipc = 0, i, j, max = 0, stripdir;
 	ENTRY		  hent;
 	ENTRY		 *hentp;
+	char		**keys = NULL;	/* hdestroy(3) doesn't free them */
+	size_t		  nkeys = 0;
 	int		  fts_flags;
 	bool		  have_dotdir = false;
 
@@ -2802,6 +2804,10 @@ flist_gen_dels(struct sess *sess, const char *root, struct flist **fl,
 		ERR("hcreate");
 		goto out;
 	}
+	if ((keys = calloc(wflsz ? wflsz : 1, sizeof(*keys))) == NULL) {
+		ERR("calloc");
+		goto out;
+	}
 
 	for (i = 0; i < wflsz; i++) {
 		const char *kpath;
@@ -2823,7 +2829,8 @@ flist_gen_dels(struct sess *sess, const char *root, struct flist **fl,
 			 * src spec listed multiple times, so just drop it.
 			 */
 			free(hent.key);
-		}
+		} else
+			keys[nkeys++] = hent.key;
 	}
 
 	/*
@@ -3032,6 +3039,10 @@ out:
 	free(cargv);
 	free(skipv);
 	hdestroy();
+	/* A long-running process (the Classic Mac OS app) must not leak them. */
+	for (i = 0; i < nkeys; i++)
+		free(keys[i]);
+	free(keys);
 	return rc;
 }
 

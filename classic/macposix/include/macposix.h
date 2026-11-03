@@ -378,6 +378,8 @@ extern void (*mp_event_hook)(struct EventRecord *);
 /* Ask a listening server to return between connections (poll EINTR). */
 extern int mp_listen_pause;
 unsigned long mp_local_ip(void);
+/* Lowest FreeMem() seen by mp_yield() (reset by the "memory" command). */
+extern long mp_mem_low;
 int	mp_vsnprintf(char *, size_t, const char *, va_list);
 extern int mp_tracing;
 

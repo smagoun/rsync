@@ -71,6 +71,7 @@ __wrap__getentropy_r(struct _reent *r, void *buf, size_t len)
  * console window keeps its own.
  */
 int mp_interrupted;
+long mp_mem_low = 0x7fffffffL;
 void (*mp_event_hook)(EventRecord *);
 
 /*
@@ -85,6 +86,11 @@ mp_yield(void)
 	static unsigned long last;
 	EventRecord ev;
 
+	long f;
+
+	/* Memory high-water mark (the "memory" command reports it). */
+	if ((f = FreeMem()) < mp_mem_low)
+		mp_mem_low = f;
 	if (TickCount() - last < (mp_event_hook ? 2 : 6))
 		return;
 	last = TickCount();

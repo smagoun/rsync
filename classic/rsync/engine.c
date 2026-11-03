@@ -44,6 +44,7 @@ static jmp_buf *exit_target;
 static int exit_status;
 static int in_rsync;
 int engine_busy;
+static Ptr *engine_ballast;
 
 void
 rsync_exit(int status)
@@ -441,6 +442,51 @@ engine_builtin(const char *line)
 	char name[64];
 	const char *eq;
 
+	/* Testing aid: "memory hold N" ties up N K, "memory release" frees it. */
+	if (strncmp(line, "memory hold ", 12) == 0) {
+		static Ptr ballast[64];
+		long k = atol(line + 12), chunk;
+		int i;
+
+		for (i = 0; i < 64 && k > 0; i++) {
+			if (ballast[i] != NULL)
+				continue;
+			chunk = k > 1024 ? 1024 : k;
+			if ((ballast[i] = NewPtr(chunk * 1024)) == NULL)
+				break;
+			k -= chunk;
+		}
+		printf("memory: holding; %ld K free now\n", FreeMem() / 1024);
+		engine_ballast = ballast;
+		return 1;
+	}
+	if (strcmp(line, "memory release") == 0) {
+		int i;
+
+		for (i = 0; engine_ballast != NULL && i < 64; i++)
+			if (engine_ballast[i] != NULL) {
+				DisposePtr(engine_ballast[i]);
+				engine_ballast[i] = NULL;
+			}
+		printf("memory: released; %ld K free now\n", FreeMem() / 1024);
+		return 1;
+	}
+	if (strcmp(line, "memory") == 0) {
+		THz z = ApplicationZone();
+		long heap = (long)((Ptr)z->bkLim - (Ptr)z);
+		long free_now = FreeMem();
+
+		printf("memory: partition heap %ld K, free %ld K (largest "
+		    "block %ld K), stack free %ld K\n", heap / 1024,
+		    free_now / 1024, (long)MaxBlock() / 1024,
+		    (long)StackSpace() / 1024);
+		if (mp_mem_low != 0x7fffffffL)
+			printf("memory: lowest free since last report %ld K "
+			    "(peak use %ld K above now)\n", mp_mem_low / 1024,
+			    (free_now - mp_mem_low) / 1024);
+		mp_mem_low = free_now;
+		return 1;
+	}
 	if (strncmp(line, "trace ", 6) == 0) {
 		mp_tracing = strcmp(line + 6, "on") == 0;
 		return 1;
