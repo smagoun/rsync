@@ -69,7 +69,7 @@ Findings:
    * The xattr also holds the comment (4), dates (8), AFP info (14) and netatalk's private dev/ino/sync/CNID entries. These are not needed on the Mac. Creation date is the only loss (see 5).
 3. **Mtime behaviour:**
    * Opening a file over AFP changes only the data file's **ctime**. No mtime or size changes.
-   * **Editing only the resource fork (same length) bumps the `._` mtime but *not* the data file's mtime.** So the client can't rely on the data mtime to catch fork changes. It uses the `max()` rule in §3.2.
+   * **Editing only the resource fork (same length) bumps the `._` mtime but *not* the data file's mtime.** So the client can't rely on the data mtime to catch fork changes. The client keeps the two mtimes separately (§3.2).
    * The data file's mtime is the Mac's own modification date, which AFP sets. It stayed in UTC across the Mac's DST change.
 4. **Older `.AppleDouble/` v2 sidecars** (741-byte header) seen earlier may be corrupt or leftovers. The client still parses them, at low priority. The parser is generic over the entry table, so it costs almost nothing extra.
 5. **Still to check:**
