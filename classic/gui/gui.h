@@ -72,6 +72,8 @@ int	editor_is(WindowPtr);
 void	editor_event(EventRecord *);
 void	editor_close(void);
 int	editor_index(void);
+enum { EDIT_CUT, EDIT_COPY, EDIT_PASTE, EDIT_CLEAR };
+void	editor_edit(int);	/* Edit menu command */
 
 /* ---- console ------------------------------------------------------------ */
 

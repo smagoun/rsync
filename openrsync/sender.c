@@ -1961,6 +1961,7 @@ rsync_sender(struct sess *sess, int fdin,
 	LOG3("sender finished updating");
 	rc = 1;
 out:
+	io_unregister_handlers();
 	send_up_reset(&up);
 	while ((dl = TAILQ_FIRST(&sdlq)) != NULL) {
 		TAILQ_REMOVE(&sdlq, dl, entries);

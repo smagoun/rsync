@@ -346,14 +346,8 @@ do_menu(long choice)
 		if (SystemEdit(item - 1))
 			break;
 		if (editor_is(front)) {
-			if (item == E_CUT)
-				gui_DialogCut((DialogPtr)front);
-			else if (item == E_COPY)
-				gui_DialogCopy((DialogPtr)front);
-			else if (item == E_PASTE)
-				gui_DialogPaste((DialogPtr)front);
-			else if (item == E_CLEAR)
-				gui_DialogDelete((DialogPtr)front);
+			if (item >= E_CUT && item <= E_CLEAR)
+				editor_edit(item - E_CUT);
 		} else if (console_is(front))
 			console_edit(item);
 		break;

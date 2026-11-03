@@ -559,6 +559,22 @@ io_register_handler(enum iotag tag, io_tag_handler_fn *fn, void *cookie)
 }
 
 /*
+ * Remove all tag handlers.  Their cookies live on the caller's stack, and
+ * a program that runs more than one transfer (the Classic Mac OS build)
+ * must not see a previous run's handlers.
+ */
+void
+io_unregister_handlers(void)
+{
+	struct io_tag_handler *ihandler;
+
+	while ((ihandler = SLIST_FIRST(&io_tag_handlers)) != NULL) {
+		SLIST_REMOVE_HEAD(&io_tag_handlers, entry);
+		free(ihandler);
+	}
+}
+
+/*
  * Call a handler for the tag with the given buffer.
  * Returns 1 if the tag was handled, and sets *ret to the handler's return
  * value, or 0 if the tag was not handled.

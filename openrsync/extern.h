@@ -1045,6 +1045,7 @@ const struct flist *find_hl(const struct flist *, const struct hardlinks *);
 int num_hl(const struct flist *, const struct hardlinks *);
 
 int	io_register_handler(enum iotag, io_tag_handler_fn *, void *);
+void	io_unregister_handlers(void);
 int	io_read_line(struct sess *, int, char *, size_t *);
 int	io_read_buf(struct sess *, int, void *, size_t);
 int	io_read_byte(struct sess *, int, uint8_t *);

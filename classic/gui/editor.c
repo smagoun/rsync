@@ -29,6 +29,21 @@ enum {
 static DialogPtr dlg;
 static int editing;		/* index into bookmarks, or -1 for new */
 
+/*
+ * The password field shows one bullet per character; the characters
+ * themselves are kept here, updated as keys and Edit commands change
+ * the field (whose text is only bullets).
+ */
+static char secret[sizeof(((struct bookmark *)0)->pass)];
+#define BULLET	'\xa5'		/* MacRoman */
+
+/* Edit text items, in Tab order (Shift-Tab walks this backwards). */
+static const short edit_items[] = {
+	I_NAME, I_HOST, I_PORT, I_MODULE, I_PATH, I_USER, I_PASS, I_LOCAL,
+	I_EXTS, I_EXCL
+};
+#define NEDIT	(short)(sizeof(edit_items) / sizeof(edit_items[0]))
+
 int
 editor_is(WindowPtr w)
 {
@@ -97,7 +112,7 @@ read_fields(struct bookmark *b)
 	get_text(I_MODULE, b->module, sizeof(b->module));
 	get_text(I_PATH, b->path, sizeof(b->path));
 	get_text(I_USER, b->user, sizeof(b->user));
-	get_text(I_PASS, b->pass, sizeof(b->pass));
+	snprintf(b->pass, sizeof(b->pass), "%s", secret);
 	get_text(I_LOCAL, b->local, sizeof(b->local));
 	b->netatalk = get_check(I_NETATALK);
 	b->xattrs = get_check(I_XATTRS);
@@ -114,7 +129,7 @@ read_fields(struct bookmark *b)
 static void
 write_fields(const struct bookmark *b)
 {
-	char port[16];
+	char port[16], bullets[sizeof(secret)];
 
 	set_text(I_NAME, b->name);
 	set_check(I_PULL, !b->push);
@@ -125,7 +140,10 @@ write_fields(const struct bookmark *b)
 	set_text(I_MODULE, b->module);
 	set_text(I_PATH, b->path);
 	set_text(I_USER, b->user);
-	set_text(I_PASS, b->pass);
+	snprintf(secret, sizeof(secret), "%s", b->pass);
+	memset(bullets, BULLET, strlen(secret));
+	bullets[strlen(secret)] = '\0';
+	set_text(I_PASS, bullets);
 	set_text(I_LOCAL, b->local);
 	set_check(I_NETATALK, b->netatalk);
 	set_check(I_XATTRS, b->xattrs);
@@ -151,6 +169,122 @@ show_command(void)
 	if (strlen(cmd) > 250)
 		strcpy(cmd + 247, "...");
 	set_text(I_CMD, cmd);
+}
+
+/* ---- the password field and Shift-Tab ------------------------------------ */
+
+static short
+focus_item(void)
+{
+	return ((DialogPeek)dlg)->editField + 1;
+}
+
+/* Replace secret[start, end) with n bytes of text; 0 if it won't fit. */
+static int
+secret_replace(short start, short end, const char *text, size_t n)
+{
+	size_t len = strlen(secret);
+
+	if (end > (short)len)
+		end = (short)len;
+	if (start > end)
+		start = end;
+	if (len - (size_t)(end - start) + n >= sizeof(secret))
+		return 0;
+	memmove(secret + start + n, secret + end, len - (size_t)end + 1);
+	memcpy(secret + start, text, n);
+	return 1;
+}
+
+/*
+ * A key typed into the password field: record it in secret and turn it
+ * into a bullet (or swallow it).  Returns 0 if the event was consumed.
+ */
+static int
+password_key(EventRecord *ev)
+{
+	TEHandle te = ((DialogPeek)dlg)->textH;
+	short start = (*te)->selStart, end = (*te)->selEnd;
+	char key = (char)(ev->message & charCodeMask);
+
+	if (key == 0x08) {		/* Backspace */
+		if (start == end && start > 0)
+			start--;
+		secret_replace(start, end, "", 0);
+		return 1;
+	}
+	if ((key >= 0x1C && key <= 0x1F) || key == '\t')  /* arrows, Tab */
+		return 1;
+	if ((unsigned char)key < 0x20 || key == 0x7F)
+		return 0;
+	if (!secret_replace(start, end, &key, 1)) {
+		SysBeep(1);
+		return 0;
+	}
+	ev->message = (ev->message & ~charCodeMask) | (unsigned char)BULLET;
+	return 1;
+}
+
+static void
+previous_field(void)
+{
+	short i, cur = focus_item();
+
+	for (i = 0; i < NEDIT; i++)
+		if (edit_items[i] == cur)
+			break;
+	i = (i == 0 || i == NEDIT) ? NEDIT - 1 : i - 1;
+	SelectDialogItemText(dlg, edit_items[i], 0, 32767);
+}
+
+/* Edit menu: Cut, Copy, Paste, Clear (EDIT_*). */
+void
+editor_edit(int what)
+{
+	TEHandle te = ((DialogPeek)dlg)->textH;
+	short start, end;
+	Handle h;
+	long off, len;
+	char bullets[sizeof(secret)];
+
+	if (focus_item() != I_PASS) {
+		if (what == EDIT_CUT)
+			gui_DialogCut(dlg);
+		else if (what == EDIT_COPY)
+			gui_DialogCopy(dlg);
+		else if (what == EDIT_PASTE)
+			gui_DialogPaste(dlg);
+		else
+			gui_DialogDelete(dlg);
+		show_command();
+		return;
+	}
+	/* The password is never copied out; it can be pasted in. */
+	start = (*te)->selStart;
+	end = (*te)->selEnd;
+	if (what == EDIT_COPY || what == EDIT_CUT) {
+		SysBeep(1);
+		return;
+	}
+	if (what == EDIT_CLEAR) {
+		secret_replace(start, end, "", 0);
+		TEDelete(te);
+		return;
+	}
+	if ((h = NewHandle(0)) == NULL)
+		return;
+	len = GetScrap(h, 'TEXT', &off);
+	if (len > 0) {
+		HLock(h);
+		if (secret_replace(start, end, *h, (size_t)len)) {
+			memset(bullets, BULLET, (size_t)len);
+			TEDelete(te);
+			TEInsert(bullets, len, te);
+		} else
+			SysBeep(1);
+		HUnlock(h);
+	}
+	DisposeHandle(h);
 }
 
 /* ---- building the window -------------------------------------------------- */
@@ -376,6 +510,12 @@ editor_event(EventRecord *ev)
 			editor_close();
 			return;
 		}
+		if (key == '\t' && (ev->modifiers & shiftKey)) {
+			previous_field();
+			return;
+		}
+		if (focus_item() == I_PASS && !password_key(ev))
+			return;
 	}
 	if (!DialogSelect(ev, &which, &item) || which != dlg)
 		return;

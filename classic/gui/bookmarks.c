@@ -507,6 +507,26 @@ bookmarks_open(void)
 	bookmarks_server_changed();
 }
 
+/*
+ * The size box alone: DrawGrowIcon also draws the outlines of scroll bars
+ * along the right and bottom edges, which this window doesn't have (the
+ * list has its own), so clip to the box.
+ */
+static void
+draw_grow_box(void)
+{
+	RgnHandle save = NewRgn();
+	Rect r = win->portRect;
+
+	GetClip(save);
+	r.left = r.right - 15;
+	r.top = r.bottom - 15;
+	ClipRect(&r);
+	DrawGrowIcon(win);
+	SetClip(save);
+	DisposeRgn(save);
+}
+
 static void
 draw_status(void)
 {
@@ -544,7 +564,7 @@ bookmarks_update(void)
 	FrameRect(&lr);
 	LUpdate(win->visRgn, list);
 	DrawControls(win);
-	DrawGrowIcon(win);
+	draw_grow_box();
 	draw_status();
 	EndUpdate(win);
 	SetPort(old);
@@ -561,7 +581,7 @@ bookmarks_activate(int on)
 	LActivate(on, list);
 	for (i = 0; i < NBUTTONS; i++)
 		HiliteControl(buttons[i], on ? 0 : 255);
-	DrawGrowIcon(win);
+	draw_grow_box();
 	SetPort(old);
 }
 
