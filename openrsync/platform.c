@@ -415,6 +415,10 @@ platform_finish_transfer(const struct sess *sess, struct flist *fl,
 int
 platform_flist_modify(const struct sess *sess, struct fl *fl)
 {
+#if HAVE_NETATALK
+	if (sess->opts->extended_attributes && netatalk_active)
+		return netatalk_flist_modify(sess, fl);
+#endif
 
 	return 1;
 }
@@ -435,6 +439,19 @@ platform_flist_received(struct sess *sess, struct flist *fl, size_t flsz)
 int
 platform_flist_entry_received(struct sess *sess, int fdin, struct flist *f)
 {
+#if HAVE_NETATALK
+	uint8_t xattr;
+
+	/*
+	 * Apple's -E puts one byte after each entry (does it have a "._"
+	 * entry?).  netatalk_flist_received() pairs the entries itself.
+	 */
+	if (sess->opts->extended_attributes &&
+	    !io_read_byte(sess, fdin, &xattr)) {
+		ERRX1("io_read_byte");
+		return 0;
+	}
+#endif
 
 	return 1;
 }

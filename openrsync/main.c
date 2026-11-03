@@ -947,6 +947,7 @@ enum {
 	OP_EXECUTABILITY,
 	OP_NETATALK,
 	OP_NO_NETATALK,
+	OP_XATTRS,
 	OP_MAC_TYPES,
 	OP_MAC_TEXT,
 	OP_DST_WINDOW,
@@ -1012,6 +1013,8 @@ const struct option	 rsync_lopts[] = {
     { "existing",	no_argument, NULL,			OP_IGNORE_NON_EXISTING },
 #ifdef __APPLE__
     { "extended-attributes",	no_argument, NULL,		'E' },
+#elif HAVE_NETATALK
+    { "extended-attributes",	no_argument, NULL,		OP_XATTRS },
 #endif
     { "filter",		required_argument, NULL,		'f' },
     { "force",		no_argument,	NULL,			OP_FORCE },
@@ -1262,15 +1265,21 @@ rsync_getopt(int argc, char *argv[], rsync_option_filter *filter,
 			opts.devices = 1;
 			opts.specials = 1;
 			break;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__MACOS_CLASSIC__)
+		/*
+		 * Apple's -E: resource forks and Finder info as "._" entries.
+		 * On Classic Mac OS too: Apple's rsync 2.6.9 sends -E in its
+		 * short-option cluster, and --executability means nothing on
+		 * HFS.
+		 */
 		case 'E':
 			opts.extended_attributes = 1;
 			break;
-#else
-		case 'E':
-			/* fallthru */
 #endif
 #if HAVE_NETATALK
+		case OP_XATTRS:
+			opts.extended_attributes = 1;
+			break;
 		case OP_NETATALK:
 			netatalk_active = 1;
 			break;
@@ -1292,7 +1301,8 @@ rsync_getopt(int argc, char *argv[], rsync_option_filter *filter,
 		case OP_NO_DST_WINDOW:
 			opts.dst_window = -1;
 			break;
-#if HAVE_NETATALK
+#if !defined(__APPLE__) && !defined(__MACOS_CLASSIC__)
+		case 'E':	/* rsync 3: --executability */
 #endif
 		case OP_EXECUTABILITY:
 			opts.preserve_executability = 1;

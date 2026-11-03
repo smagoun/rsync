@@ -338,7 +338,7 @@ fargs_cmdline(struct sess *sess, const struct fargs *f, size_t *skip)
 		addargs(&args, "--safe-links");
 	if (sess->opts->remove_source)
 		addargs(&args, "--remove-source-files");
-#ifdef __APPLE__
+#if defined(__APPLE__) || HAVE_NETATALK
 	if (sess->opts->extended_attributes)
 		addargs(&args, "--extended-attributes");
 #endif

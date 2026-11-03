@@ -106,6 +106,8 @@ int	mactext_match(const char *);
 /* Platform hooks used by platform.c when netatalk_active. */
 struct sess;
 struct flist;
+struct fl;
+int	netatalk_flist_modify(const struct sess *, struct fl *);
 void	netatalk_flist_received(struct sess *, struct flist *, size_t);
 void	netatalk_clear_stale(struct sess *, int, struct flist *, size_t);
 int	netatalk_move_file(const struct sess *, struct flist *, int,

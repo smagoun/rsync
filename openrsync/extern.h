@@ -573,7 +573,7 @@ struct	opts {
 	int		 dst_window;		/* --[no-]dst-window: 1 on, -1 off */
 	int		 fuzzy_basis;		/* -y */
 	long		 max_delete;		/* --max-delete */
-#ifdef __APPLE__
+#if defined(__APPLE__) || HAVE_NETATALK
 	int		 extended_attributes;	/* --extended-attributes */
 #endif
 	int		 ignore_nonreadable;	/* daemon: ignore nonreadable */

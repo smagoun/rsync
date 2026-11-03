@@ -435,6 +435,76 @@ netatalk_clear_stale(struct sess *sess, int rootfd, struct flist *fl,
 	}
 }
 
+/* ---------------------------------------------------------------------
+ * Apple's -E (--extended-attributes) as a sender: like macOS rsync, add a
+ * synthetic "._name" AppleDouble entry for every file that has a resource
+ * fork or Finder info, and write one byte after each entry saying whether
+ * it has one.  (A macOS receiver unpacks them with copyfile(3); ours
+ * unpacks them in netatalk_move_file.)  Unlike macOS, the entry's size is
+ * the real packed size, so our receivers can quick-check it.
+ */
+
+static int
+xattr_sent(struct sess *sess, int fd, const struct flist *f)
+{
+	return io_write_byte(sess, fd, (f->st.flags & NT_HAS_SIDECAR) ? 1 : 0);
+}
+
+static int
+xattr_open(const struct sess *sess, const struct flist *f, int oflags)
+{
+	char base[PATH_MAX];
+
+	(void)sess;
+	(void)oflags;
+	if (base_of(f->path, base, sizeof(base)) == -1)
+		return -1;
+	return open_packed(AT_FDCWD, base);
+}
+
+int
+netatalk_flist_modify(const struct sess *sess, struct fl *fl)
+{
+	struct flist *f, *packed;
+	struct nt_meta m;
+	const char *base;
+	char *ppath;
+	ptrdiff_t stripdir;
+	size_t i, insz = fl->sz;
+
+	(void)sess;
+	for (i = 0; i < insz; i++) {
+		f = &fl->flp[i];
+		f->sent = xattr_sent;
+		if (!S_ISREG(f->st.mode) || netatalk_is_sidecar(f->path))
+			continue;
+		if (ntb_get(AT_FDCWD, f->path, &m) == -1 || !meta_present(&m))
+			continue;
+		base = basename_of(f->path);
+		stripdir = f->wpath - f->path;
+		if (asprintf(&ppath, "%.*s._%s", (int)(base - f->path),
+		    f->path, base) == -1) {
+			ERR("asprintf");
+			return 0;
+		}
+		packed = fl_new(fl);
+		f = &fl->flp[i];	/* fl_new() may have moved the list */
+		memcpy(packed, f, sizeof(*f));
+		packed->froot = NULL;	/* opened through xattr_open() */
+		packed->path = ppath;
+		packed->wpath = ppath + stripdir;
+		packed->link = NULL;
+		packed->st.size = AD_NETATALK_HDRLEN + (off_t)m.rsrc_len;
+		if (m.sidecar_mtime != 0)
+			packed->st.mtime = m.sidecar_mtime;
+		packed->st.flags &= ~NT_HAS_SIDECAR;
+		packed->open = xattr_open;
+		packed->sent = xattr_sent;
+		f->st.flags |= NT_HAS_SIDECAR;
+	}
+	return 1;
+}
+
 /* Unpack a received "._foo" (temp file fromfd/fname) into toname's base. */
 static int
 unpack(const struct sess *sess, struct flist *f, int fromfd,
