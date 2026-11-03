@@ -2022,6 +2022,10 @@ main(int argc, char *argv[])
 	if (rsync_getopt(argc, argv, NULL, NULL) == NULL) {
 		usage(ERR_SYNTAX);
 	}
+#ifdef __MACOS_CLASSIC__
+	/* Pass UTF-8 names through; the console converts them to MacRoman. */
+	opts.bit8 = 1;
+#endif
 
 	argc -= optind;
 	argv += optind;

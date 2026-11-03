@@ -164,7 +164,8 @@ open_node(struct mp_node *n, int flags, mode_t mode)
 			errno = ENOENT;
 			return -1;
 		}
-		if ((err = FSpCreate(&spec, '????', '????', smSystemScript))
+		/* Blank Finder info: "no metadata" for --netatalk (see meta.c). */
+		if ((err = FSpCreate(&spec, 0, 0, smSystemScript))
 		    != noErr)
 			return mp_oserr(err);
 		if (mp_refresh(n) == -1)

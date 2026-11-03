@@ -70,7 +70,11 @@
 #endif
 
 /* Chunk large fmaps into 4MB pieces, arbitrarily. */
+#ifdef __MACOS_CLASSIC__
+#define	HASH_LARGE_CHUNK_SIZE (256 * 1024)
+#else
 #define	HASH_LARGE_CHUNK_SIZE (4 * 1024 * 1024)
+#endif
 
 #define	STRMODE_BUFSZ	12	/* Documented size of all strmode calls */
 
@@ -440,7 +444,12 @@ struct	flist {
  * Allocate the file list in chunk sizes of 8MiB's worth of items
  * to reduce thrashing the memory allocator and improve performance.
  */
+#ifdef __MACOS_CLASSIC__
+/* A Mac application partition is a few megabytes: grow in small steps. */
+#define	FLIST_CHUNK_SIZE	((64 << 10) / sizeof(struct flist))
+#else
 #define	FLIST_CHUNK_SIZE	((8 << 20) / sizeof(struct flist))
+#endif
 
 #define	FLIST_COMPLETE		0x01	/* Finished */
 #define	FLIST_REDO		0x02	/* Finished, but go again */

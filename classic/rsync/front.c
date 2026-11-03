@@ -80,17 +80,69 @@ __wrap__exit(int status)
 ssize_t	__real__consolewrite(int, const void *, size_t);
 static short logref;
 
+/*
+ * rsync prints UTF-8; the console window and "rsync log" are MacRoman.
+ * Convert on the way out (a sequence may be split across calls).
+ */
+static size_t
+utf8_to_macroman(const unsigned char *in, size_t len, char *out)
+{
+	static unsigned char pend[4];
+	static size_t npend;
+	unsigned char seq[4], mr[HFS_NAMEMAX + 1];
+	char tmp[8];
+	size_t i, n = 0, need;
+
+	for (i = 0; i < len; i++) {
+		if (npend == 0 && in[i] < 0x80) {
+			out[n++] = (char)in[i];
+			continue;
+		}
+		pend[npend++] = in[i];
+		need = pend[0] >= 0xF0 ? 4 : pend[0] >= 0xE0 ? 3 :
+		    pend[0] >= 0xC0 ? 2 : 1;
+		if (npend < need)
+			continue;
+		memcpy(seq, pend, npend);
+		memcpy(tmp, seq, npend);
+		tmp[npend] = '\0';
+		npend = 0;
+		/* hfs_encode_name swaps ':' and '/', irrelevant for one char. */
+		if (need > 1 && hfs_encode_name(tmp, mr) == 0 && mr[0] == 1)
+			out[n++] = (char)mr[1];
+		else
+			out[n++] = '?';
+	}
+	return n;
+}
+
 ssize_t
 __wrap__consolewrite(int fd, const void *buf, size_t len)
 {
-	long n = (long)len;
+	char conv[512], crbuf[512];
+	const unsigned char *p = buf;
+	size_t chunk, n, i;
+	long cnt;
 
-	if (logref != 0) {
-		FSWrite(logref, &n, buf);
-		/* Flush so the log survives a crash. */
-		FlushVol(NULL, 0);
+	while (len > 0) {
+		chunk = len > sizeof(conv) ? sizeof(conv) : len;
+		n = utf8_to_macroman(p, chunk, conv);
+		if (logref != 0) {
+			/* A Mac text file: CR line ends. */
+			memcpy(crbuf, conv, n);
+			for (i = 0; i < n; i++)
+				if (crbuf[i] == '\n')
+					crbuf[i] = '\r';
+			cnt = (long)n;
+			FSWrite(logref, &cnt, crbuf);
+			/* Flush so the log survives a crash. */
+			FlushVol(NULL, 0);
+		}
+		__real__consolewrite(fd, conv, n);
+		p += chunk;
+		len -= chunk;
 	}
-	return __real__consolewrite(fd, buf, len);
+	return (ssize_t)(p - (const unsigned char *)buf);
 }
 
 static void

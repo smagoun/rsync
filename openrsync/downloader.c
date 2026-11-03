@@ -54,7 +54,11 @@
  * Disable the pre-write buffer by having this be zero.
  * (It doesn't affect performance much.)
  */
+#ifdef __MACOS_CLASSIC__
+#define	OBUF_SIZE	(64 * 1024)
+#else
 #define	OBUF_SIZE	(1024 * 1024)
+#endif
 
 enum	downloadst {
 	DOWNLOAD_READ_NEXT = 0,

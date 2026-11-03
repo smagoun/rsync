@@ -155,7 +155,7 @@ ntb_set(int dirfd, const char *path, const uint8_t finfo[AD_FINDERI_LEN],
 	mp_node_spec(&n, &spec);
 	if (!n.exists) {
 		/* The sidecar may arrive for a base we do not have yet. */
-		if ((err = FSpCreate(&spec, '????', '????', smSystemScript))
+		if ((err = FSpCreate(&spec, 0, 0, smSystemScript))
 		    != noErr)
 			return mp_oserr(err);
 		if (mp_refresh(&n) == -1)
