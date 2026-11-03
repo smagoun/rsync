@@ -372,6 +372,12 @@ extern int optreset;
 void	mp_yield(void);
 /* Set by mp_yield() when the user presses Cmd-.; waits return EINTR. */
 extern int mp_interrupted;
+/* GUI hook: every event seen while rsync waits (see misc.c). */
+struct EventRecord;
+extern void (*mp_event_hook)(struct EventRecord *);
+/* Ask a listening server to return between connections (poll EINTR). */
+extern int mp_listen_pause;
+unsigned long mp_local_ip(void);
 int	mp_vsnprintf(char *, size_t, const char *, va_list);
 extern int mp_tracing;
 

@@ -31,6 +31,7 @@ struct mp_sock {
 };
 
 static short drv;
+int mp_listen_pause;
 
 static int	accept_ready(struct mp_sock *);
 
@@ -589,22 +590,24 @@ mp_poll(struct pollfd *pfd, nfds_t n, int timeout)
 	unsigned long deadline;
 	struct mp_fd *f;
 	nfds_t i;
-	int ready;
+	int ready, listener;
 
-	MPTRACE("[poll n=%u t=%d]", (unsigned)n, timeout);
 	deadline = TickCount() + (timeout < 0 ? 0 :
 	    ((unsigned long)timeout * 60 + 999) / 1000);
 	for (;;) {
 		ready = 0;
+		listener = 0;
 		for (i = 0; i < n; i++) {
 			pfd[i].revents = 0;
 			if (pfd[i].fd < 0)
 				continue;
 			if ((f = mp_fdget(pfd[i].fd)) == NULL)
 				pfd[i].revents = POLLNVAL;
-			else if (f->type == MPF_SOCK)
+			else if (f->type == MPF_SOCK) {
+				listener |= f->sock->listening;
 				mp_sock_poll(f->sock, pfd[i].events,
 				    &pfd[i].revents);
+			}
 			else
 				pfd[i].revents = pfd[i].events &
 				    (POLLIN | POLLOUT);
@@ -614,7 +617,11 @@ mp_poll(struct pollfd *pfd, nfds_t n, int timeout)
 		if (ready || timeout == 0 ||
 		    (timeout > 0 && TickCount() >= deadline))
 			return ready;
-		if (mp_interrupted) {
+		/*
+		 * Interrupted (Cmd-.), or a server asked to pause while it
+		 * waits for the next client (the GUI runs a sync meanwhile).
+		 */
+		if (mp_interrupted || (listener && mp_listen_pause)) {
 			errno = EINTR;
 			return -1;
 		}
@@ -623,6 +630,31 @@ mp_poll(struct pollfd *pfd, nfds_t n, int timeout)
 }
 
 /* ---- addresses ------------------------------------------------------- */
+
+/* This Mac's IP address (0 if TCP/IP is not set up). */
+unsigned long
+mp_local_ip(void)
+{
+	struct {
+		QElemPtr qLink;
+		INTEGER qType, ioTrap;
+		Ptr ioCmdAddr;
+		ProcPtr ioCompletion;
+		OSErr ioResult;
+		StringPtr ioNamePtr;
+		INTEGER ioVRefNum, ioCRefNum, csCode;
+		unsigned long ourAddress, ourNetMask;
+	} pb;
+
+	if (open_driver() == -1)
+		return 0;
+	memset(&pb, 0, sizeof(pb));
+	pb.ioCRefNum = drv;
+	pb.csCode = ipctlGetAddr;
+	if (PBControlSync((ParmBlkPtr)&pb) != noErr)
+		return 0;
+	return pb.ourAddress;
+}
 
 int
 mp_inet_pton(int af, const char *src, void *dst)

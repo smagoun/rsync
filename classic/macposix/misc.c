@@ -71,16 +71,28 @@ __wrap__getentropy_r(struct _reent *r, void *buf, size_t len)
  * console window keeps its own.
  */
 int mp_interrupted;
+void (*mp_event_hook)(EventRecord *);
 
+/*
+ * Called by every wait (sockets, poll, long copies).  Without a GUI it
+ * only lets other applications run and watches for Cmd-.; with one
+ * (mp_event_hook set) it hands every event to the GUI, which keeps its
+ * windows working and sets mp_interrupted for Stop / Cmd-.
+ */
 void
 mp_yield(void)
 {
 	static unsigned long last;
 	EventRecord ev;
 
-	if (TickCount() - last < 6)
+	if (TickCount() - last < (mp_event_hook ? 2 : 6))
 		return;
 	last = TickCount();
+	if (mp_event_hook != NULL) {
+		WaitNextEvent(everyEvent, &ev, 0, NULL);
+		mp_event_hook(&ev);
+		return;
+	}
 	WaitNextEvent(0, &ev, 0, NULL);
 	/* Cmd-. : take it out of the queue and flag an interrupt. */
 	if (EventAvail(keyDownMask, &ev) && (ev.modifiers & cmdKey) &&

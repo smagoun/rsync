@@ -27,7 +27,7 @@ set_source_files_properties(${O}/main.c PROPERTIES
     COMPILE_DEFINITIONS main=rsync_main)
 target_compile_options(openrsync PRIVATE -w)
 
-add_application(rsync front.c rsync.r CONSOLE CREATOR "rSnc")
+add_application(rsync front.c engine.c rsync.r CONSOLE CREATOR "rSnc")
 target_link_libraries(rsync openrsync macposix)
 target_link_options(rsync PRIVATE "-Wl,--wrap=_consolewrite"
     "-Wl,--wrap=abort" "-Wl,--wrap=_exit")
