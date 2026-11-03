@@ -323,7 +323,7 @@ Progress so far:
 | 2 | **Done.** `--netatalk` is implemented as a virtual `._name` layer, not as file-list rewriting (§3.2). `classic/tests/netatalk_test.sh` passes against a stock rsync 3.2.7 daemon. Out of scope: the `.AppleDouble/` v2 layout |
 | 3 | **Done.** macposix covers files, directories, rename that keeps forks, times, MacTCP sockets, `poll` and MacTCP DNR host names. `hfsname.c` handles names. `mptest` passes 52/52 in QEMU |
 | 4 | **Working in QEMU.** Pull with forks and Finder info, no-op second run, fork-only and data-only updates, replacing files, `--delete`, MacRoman and long names, DST tolerance. Not done: tests on real hardware and on the owner's netatalk server |
-| 5 | **Mostly done.** The prompt, `$(VAR)` from `rsync prefs`, `set`, HFS path arguments, MacRoman console output, `--mac-types` and `--mac-text` work. Not done: profiles, drag and drop, Cmd-. |
+| 5 | **Mostly done.** The prompt, `$(VAR)` from `rsync prefs`, `set`, HFS path arguments, MacRoman console output, Cmd-. to interrupt, `--mac-types` and `--mac-text` work. Not done: profiles, drag and drop; the GUI is designed in `docs/CLASSIC_GUI.md` |
 | 6 | Not started (local/AFP mode) |
 | 7 | **Started, working in QEMU.** `rsync --daemon` on the Mac: one connection at a time, `rsyncd.conf` next to the app, Cmd-. stops it. Pushes from rsync 3.2.7 and openrsync; Apple `-E` accepted, so macOS's stock rsync can push resource forks. Not done: serving pulls *from* the Mac with forks (sender side), the Server window (see `docs/CLASSIC_GUI.md`) |
 | 8 | Not started (TLS) |
