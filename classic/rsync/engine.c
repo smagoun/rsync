@@ -358,7 +358,8 @@ run_main(void *argv)
 int
 engine_run_argv(int argc, char **argv)
 {
-	int rc;
+	static char cwd[1024];
+	int rc, havecwd;
 
 	/*
 	 * openrsync expects a fresh process; reset what outlives a run:
@@ -373,7 +374,11 @@ engine_run_argv(int argc, char **argv)
 	in_rsync = 1;
 	engine_busy = 1;
 	mp_interrupted = 0;
+	/* The daemon changes into a module's folder; come back after. */
+	havecwd = getcwd(cwd, sizeof(cwd)) != NULL;
 	rc = classic_guarded(run_main, argv);
+	if (havecwd)
+		chdir(cwd);
 	in_rsync = 0;
 	engine_busy = 0;
 	if (mp_interrupted) {

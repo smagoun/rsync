@@ -39,7 +39,9 @@ Setting it up from the owner's UTM bundle (`Mac OS 7.1.utm`):
     qemu-img convert -O qcow2 "<bundle>/Data/F6FB7225-….qcow2" emu/s71/pram.qcow2
     cp "<bundle>/Data/QUAD650.ROM" emu/s71/q800.rom
 
-Checked on 7.1:
-* Both apps run. The GUI draws in black and white at 640×480.
-* The macposix self-test passes all its file tests, including the replace that keeps resource forks.
-* Network commands fail with "Network interface is not configured", because the image has no MacTCP. Network testing there needs MacTCP 2.0.6 added to the System Folder.
+Checked on 7.1, with MacTCP 2.0.6 (address 10.0.2.15, gateway 10.0.2.2, name server 10.0.2.3):
+* **Both apps run.** The GUI draws in black and white at 640×480.
+* **macposix self-test:** passes, including the replace that keeps resource forks, and DNS through MacTCP's DNR.
+* **Pulls:** with resource forks and type/creator. A second run transfers nothing. `--delete` works on a 2,000-entry tree, with peak use of 0.8 MB.
+* **Pushes to the Mac's daemon:** work, and Cmd-. stops it.
+* **Startup Items:** 7.1's Finder opens every file in Startup Items, one after another, without waiting for the app to quit. So the scripts mark their helper files invisible, and an unattended run (one with `rsync autoquit`) creates `rsync log` invisible too.

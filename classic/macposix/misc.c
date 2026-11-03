@@ -100,12 +100,15 @@ mp_yield(void)
 		return;
 	}
 	WaitNextEvent(0, &ev, 0, NULL);
-	/* Cmd-. : take it out of the queue and flag an interrupt. */
-	if (EventAvail(keyDownMask, &ev) && (ev.modifiers & cmdKey) &&
-	    (ev.message & charCodeMask) == '.') {
-		GetNextEvent(keyDownMask, &ev);
-		mp_interrupted = 1;
-	}
+	/*
+	 * Cmd-. flags an interrupt.  Read every queued key, not just the
+	 * first: nothing else reads keys during a command, and a key typed
+	 * earlier (even a Return) would otherwise hide Cmd-. forever.
+	 */
+	while (GetNextEvent(keyDownMask | autoKeyMask, &ev))
+		if ((ev.modifiers & cmdKey) &&
+		    (ev.message & charCodeMask) == '.')
+			mp_interrupted = 1;
 }
 
 /* ---- processes --------------------------------------------------------- */

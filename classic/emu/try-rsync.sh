@@ -18,8 +18,9 @@ for f in rsync "rsync script" "rsync log" "rsync autoquit"; do
 done
 hcopy -m "$APP" "$SI:" && hcopy -r "$T/script" "$SI:rsync script" &&
     hcopy -r "$T/aq" "$SI:rsync autoquit"
-hattrib -t TEXT -c rSnc "$SI:rsync script"
-hattrib -t TEXT -c rSnc "$SI:rsync autoquit"
+# Invisible, so the Finder (7.1 opens every file in Startup Items) skips them.
+hattrib -t TEXT -c rSnc +i "$SI:rsync script"
+hattrib -t TEXT -c rSnc +i "$SI:rsync autoquit"
 humount >/dev/null
 rm -rf "$T"
 TIMEOUT=${TIMEOUT:-300} "$S/boot-test.sh" "$SI:rsync log" | tail -n +7

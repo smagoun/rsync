@@ -58,9 +58,22 @@ __wrap__consolewrite(int fd, const void *buf, size_t len)
 static void
 log_open(void)
 {
+	FInfo fi;
+
 	FSDelete("\prsync log", 0);
-	if (Create("\prsync log", 0, 'ttxt', 'TEXT') == noErr &&
-	    FSOpen("\prsync log", 0, &logref) != noErr)
+	if (Create("\prsync log", 0, 'ttxt', 'TEXT') != noErr)
+		return;
+	/*
+	 * Unattended runs (the emulator tests) hide the log: System 7.1's
+	 * Finder opens each new file in Startup Items, and TeachText would
+	 * then take the keyboard.
+	 */
+	if (access("rsync autoquit", F_OK) == 0 &&
+	    GetFInfo("\prsync log", 0, &fi) == noErr) {
+		fi.fdFlags |= 0x4000;		/* kIsInvisible */
+		SetFInfo("\prsync log", 0, &fi);
+	}
+	if (FSOpen("\prsync log", 0, &logref) != noErr)
 		logref = 0;
 }
 
@@ -113,6 +126,9 @@ main(void)
 	engine_grow_stack(256L * 1024);
 
 	if ((script = fopen("rsync script", "r")) != NULL) {
+		/* Look now: a command (the daemon) may change directory. */
+		int autoquit = stat("rsync autoquit", &st) == 0;
+
 		log_open();
 		banner();
 		/* Lines may end in CR (Mac) or LF (Unix). */
@@ -127,7 +143,7 @@ main(void)
 		}
 		fclose(script);
 		log_close();
-		if (stat("rsync autoquit", &st) == 0)
+		if (autoquit)
 			ShutDwnPower();
 		return 0;
 	}

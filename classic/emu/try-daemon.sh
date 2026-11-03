@@ -5,7 +5,7 @@
 # host), stop the daemon with Cmd-. and print "rsync log".
 #   classic/emu/try-daemon.sh 'rsync -av tree/ rsync://127.0.0.1:8730/incoming/'
 # rsyncd.conf for the Mac comes from $RSYNCD_CONF (default: one writable
-# module "incoming" at /100 MB/Incoming).
+# module "incoming" at /<boot volume>/Incoming).
 S="$(cd "$(dirname "$0")" && pwd)"
 EMU=${EMU_DIR:-$S/../../emu}
 APP=${RSYNC_APP:-$S/../../../Retro68-build/classic/rsync/rsync.bin}
@@ -13,8 +13,9 @@ PORT=${RSYNC_FWD_PORT:-8730}
 SI=":System Folder:Startup Items"
 export HOME=${TMPDIR:-/tmp}
 T=$(mktemp -d)
+VOL=$(cd "$EMU" && hmount hd.raw 1 | sed -n 's/^Volume name is "\(.*\)"$/\1/p'; humount >/dev/null)
 if [ -n "$RSYNCD_CONF" ]; then cp "$RSYNCD_CONF" "$T/conf"; else
-	printf '[incoming]\n    path = /100 MB/Incoming\n    read only = no\n    use chroot = no\n' > "$T/conf"
+	printf '[incoming]\n    path = /%s/Incoming\n    read only = no\n    use chroot = no\n' "$VOL" > "$T/conf"
 fi
 printf '%s\r' "${DAEMON_CMD:-rsync --daemon -v}" > "$T/script"
 echo x > "$T/aq"
@@ -28,8 +29,9 @@ hcopy -m "$APP" "$SI:"
 tr '\n' '\r' < "$T/conf" > "$T/conf.cr"; hcopy -r "$T/conf.cr" "$SI:rsyncd.conf"
 hcopy -r "$T/script" "$SI:rsync script"
 hcopy -r "$T/aq" "$SI:rsync autoquit"
+# Invisible, so the Finder (7.1 opens every file in Startup Items) skips them.
 for f in rsyncd.conf "rsync script" "rsync autoquit"; do
-	hattrib -t TEXT -c rSnc "$SI:$f"
+	hattrib -t TEXT -c rSnc +i "$SI:$f"
 done
 humount >/dev/null
 rm -rf "$T"
