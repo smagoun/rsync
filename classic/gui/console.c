@@ -334,6 +334,7 @@ console_builtin(const char *line)
 		    "  server on|off        start or stop the server\r"
 		    "  set NAME=VALUE       environment, e.g. RSYNC_GMT_OFFSET\r"
 		    "  trace on|off         log file and network calls\r"
+		    "  memory               free memory and the low point since last time\r"
 		    "  clear                clear this window\r"
 		    "  quit                 quit rsync\r");
 		return 1;

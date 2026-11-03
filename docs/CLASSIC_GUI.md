@@ -212,7 +212,7 @@ Double-clicking a set in the Finder opens it and, if the *Sync when opened* chec
 * **Resources (Rez):**
   * `MENU`, `WIND`, `DLOG`/`DITL`, `ALRT`, `CNTL`, `STR#`, `vers`
   * `BNDL`, `FREF`, `ICN#`/`icl8`/`ics#` for the app and the `RSet` document
-  * `SIZE` at 12 MB preferred
+  * `SIZE` at 6 MB preferred, 3 MB minimum
 * **Standard controls:** buttons, checkboxes, radio buttons and pop-up menus (`popupMenuProc` CDEF). On Mac OS 8 they draw in Platinum without needing the Appearance Manager API.
 * **Managers:** the List Manager for lists, TextEdit for the log, the Drag Manager for folder drops, and Standard File for folder choice (no Navigation Services on 8.1).
 * **Storage:**

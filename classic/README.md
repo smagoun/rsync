@@ -9,7 +9,7 @@ There are two applications:
 * **rsync**, the windowed app (`classic/gui`):
   * **rsync Bookmarks:** one window listing your saved syncs, like an FTP client's bookmarks. New… creates one. Double-clicking (or Edit…) opens it for review. Sync runs it, and Preview does a dry run.
   * **The editor window:** has every option, a Choose… folder button, the equivalent command line, and To Console, which copies that command to the console.
-  * **rsync Console:** the command line, with history on the Up and Down arrows. `help` lists the built-ins: `bookmarks`, `sync NAME`, `preview NAME`, `server on|off`, `set`, `trace`, `clear`, `quit`.
+  * **rsync Console:** the command line, with history on the Up and Down arrows. `help` lists the built-ins: `bookmarks`, `sync NAME`, `preview NAME`, `server on|off`, `set`, `trace`, `memory`, `clear`, `quit`.
   * **The server:** starts at launch when an `rsyncd.conf` is next to the app (Server > Start Server at Launch turns that off). A sync started from the GUI pauses the server between connections, and it resumes afterwards.
   * **Storage:** bookmarks are kept in the text file `rsync Bookmarks` next to the app.
 * **rsync console**, the same engine with only a console window (`classic/rsync`). It's used for scripting and the emulator tests.
@@ -32,6 +32,7 @@ rsync -av --delete $(SRV)::src/MyApp/ :MyApp:
 * **Built-in commands:**
   * `trace on` / `trace off` logs every file and network call.
   * `set NAME=VALUE` sets an environment variable. For example, `set RSYNC_GMT_OFFSET=-18000` pins the time zone (seconds east of UTC) for a Mac that never switches to daylight saving time.
+  * `memory` prints the partition size, free memory, the largest free block and the lowest free memory since the last `memory` (the peak a command needed).
   * `quit` leaves the app.
 
 ### The Mac as a server (another computer pushes to it)

@@ -245,7 +245,26 @@ The rule is deterministic, so later runs and `--delete` find the same local name
 * **Saved profiles:** `profile name = <command line>`, run with `rsync> run name`. Dropping a profile document on the app runs it.
 * **Dropping a folder** on the window inserts its HFS path, in quotes.
 * **Progress and abort.** `-v` and `--progress` print to the window. Cmd-. aborts cleanly and removes temp files. The exit code is shown.
-* **Memory.** The SIZE resource asks for 8 MB preferred and 4 MB minimum. openrsync keeps the whole file list in memory, at about 150 bytes plus path length per entry. With `-E` the entry count roughly doubles, so 20k files need about 6 MB.
+* **Memory.** See "Memory" below.
+
+### Memory
+
+The SIZE resource asks for **6 MB preferred, 3 MB minimum**. Measured in QEMU (Mac OS 8.1, console app, with the `memory` built-in):
+
+| Part | Size | Notes |
+|---|---|---|
+| Code and static data | ~0.7 MB | Loaded at launch |
+| Per run, fixed | ~0.2 MB | 64 KB output buffer, MacTCP stream buffer (32 KB), file-list chunk (64 KB), extra stack |
+| Per file-list entry | ~320 bytes | Files, folders and `._` sidecars each count. The entry (134 bytes) plus its path, the HFS name registry (record, absolute path, hash slot), and `--delete`'s hash of local names |
+| `-z` | ~0.3 MB | zlib state |
+| Largest changed file | ~32 bytes per block | Block checksums; blocks are about the square root of the file size, so a 100 MB file needs ~0.3 MB |
+
+* **Bounded per file, not per tree.** openrsync speaks protocol 29 with no incremental recursion, so the whole file list is in memory for the length of a run. Memory grows linearly with the number of entries, and the file sizes don't matter. Data streams through fixed buffers.
+* **Released after each run.** Three `--delete` runs of a 3,900-entry tree in a row end within 2 KB of each other. An earlier leak of about 123 KB per run is fixed: newlib's `hsearch`, and `--delete`'s keys.
+* **Rough guide:** 0.9 MB + 320 bytes × entries, plus 0.3 MB with `-z`. 3 MB holds about 6,000 entries, 6 MB about 15,000. A pull of 3,900 entries completed with only 1.6 MB free.
+* **Before the measurements:** the 12 MB figure in earlier builds was a generous guess.
+* **Big trees:** raise the size in the Finder's Get Info, or split the run into several, for example one per top-level folder. What happens when memory runs out mid-run hasn't been tested yet.
+* **Fragmentation:** `malloc` is `NewPtr`, whose blocks can't move, so the largest free block shrinks a little after the first run (about 1 MB in a 12 MB partition) and then holds steady.
 
 ## 5. Are delta ("partial") transfers worth it on a 68040?
 
