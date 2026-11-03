@@ -26,3 +26,20 @@ Scripts (QEMU ≥ 8.2, `hfsutils`, `python3-pil`):
   the log from the disk.
 
 Put test apps in `:System Folder:Startup Items:` using `hcopy -m App.bin`.
+
+## System 7.1 VM
+
+A second VM in `emu/s71/` (also git-ignored) runs a minimal System 7.1 on the same Quadra ROM. Every script takes it through `EMU_DIR`:
+
+    EMU_DIR=$PWD/emu/s71 classic/emu/try-rsync.sh "memory" "rsync --version"
+
+Setting it up from the owner's UTM bundle (`Mac OS 7.1.utm`):
+
+    qemu-img convert -O raw "<bundle>/Data/ED11648F-….qcow2" emu/s71/hd.raw
+    qemu-img convert -O qcow2 "<bundle>/Data/F6FB7225-….qcow2" emu/s71/pram.qcow2
+    cp "<bundle>/Data/QUAD650.ROM" emu/s71/q800.rom
+
+Checked on 7.1:
+* Both apps run. The GUI draws in black and white at 640×480.
+* The macposix self-test passes all its file tests, including the replace that keeps resource forks.
+* Network commands fail with "Network interface is not configured", because the image has no MacTCP. Network testing there needs MacTCP 2.0.6 added to the System Folder.
