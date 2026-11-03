@@ -208,6 +208,24 @@ nt_fstatat(int dirfd, const char *path, struct stat *st, int flags)
 	return 0;
 }
 
+/* An anonymous read-write scratch file, positioned at 0. */
+static int
+scratch_fd(void)
+{
+#ifdef __MACOS_CLASSIC__
+	return mp_tmpfd();
+#else
+	FILE *tf;
+	int fd;
+
+	if ((tf = tmpfile()) == NULL)
+		return -1;
+	fd = dup(fileno(tf));
+	fclose(tf);
+	return fd;
+#endif
+}
+
 /* Build the packed AppleDouble in an anonymous temporary file. */
 static int
 open_packed(int dirfd, const char *base)
@@ -215,7 +233,6 @@ open_packed(int dirfd, const char *base)
 	struct nt_meta m;
 	uint8_t hdr[AD_NETATALK_HDRLEN];
 	char buf[8192];
-	FILE *tf;
 	off_t off;
 	ssize_t n;
 	int fd;
@@ -226,10 +243,10 @@ open_packed(int dirfd, const char *base)
 		errno = ENOENT;
 		return -1;
 	}
-	if ((tf = tmpfile()) == NULL)
+	if ((fd = scratch_fd()) == -1)
 		return -1;
 	ad_build_header(hdr, m.finfo, m.rsrc_len);
-	if (fwrite(hdr, 1, sizeof(hdr), tf) != sizeof(hdr))
+	if (write(fd, hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr))
 		goto fail;
 	for (off = 0; off < (off_t)m.rsrc_len; off += n) {
 		n = ntb_read_rsrc(dirfd, base, buf, sizeof(buf), off);
@@ -238,21 +255,14 @@ open_packed(int dirfd, const char *base)
 				errno = EIO;
 			goto fail;
 		}
-		if (fwrite(buf, 1, n, tf) != (size_t)n)
+		if (write(fd, buf, (size_t)n) != n)
 			goto fail;
 	}
-	if (fflush(tf) != 0)
+	if (lseek(fd, 0, SEEK_SET) == -1)
 		goto fail;
-	if ((fd = dup(fileno(tf))) == -1)
-		goto fail;
-	fclose(tf);
-	if (lseek(fd, 0, SEEK_SET) == -1) {
-		close(fd);
-		return -1;
-	}
 	return fd;
 fail:
-	fclose(tf);
+	close(fd);
 	return -1;
 }
 

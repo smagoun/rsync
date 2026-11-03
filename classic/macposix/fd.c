@@ -213,9 +213,14 @@ mp_openat(int dirfd, const char *path, int flags, ...)
 		mode = (mode_t)va_arg(ap, int);
 		va_end(ap);
 	}
+	int fd;
+
+	MPTRACE("[openat %d %s 0x%x]", dirfd, path, flags);
 	if (mp_resolve(dirfd, path, &n) == -1)
 		return -1;
-	return open_node(&n, flags, mode);
+	fd = open_node(&n, flags, mode);
+	MPTRACE("[=%d e%d]\n", fd, fd < 0 ? errno : 0);
+	return fd;
 }
 
 int
@@ -265,6 +270,7 @@ mp_close(int fd)
 	OSErr err = noErr;
 	int i;
 
+	MPTRACE("[close %d]\n", fd);
 	if ((f = mp_fdget(fd)) == NULL)
 		return -1;
 	if (f->type == MPF_CONSOLE) {

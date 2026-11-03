@@ -946,6 +946,7 @@ enum {
 	OP_COMPLEVEL,
 	OP_EXECUTABILITY,
 	OP_NETATALK,
+	OP_NO_NETATALK,
 	OP_LISTONLY,
 	OP_PFLISTSZ,
 
@@ -996,6 +997,7 @@ const struct option	 rsync_lopts[] = {
     { "executability",	no_argument,	NULL,			OP_EXECUTABILITY },
 #if HAVE_NETATALK
     { "netatalk",	no_argument,	NULL,			OP_NETATALK },
+    { "no-netatalk",	no_argument,	NULL,			OP_NO_NETATALK },
 #endif
     { "existing",	no_argument, NULL,			OP_IGNORE_NON_EXISTING },
 #ifdef __APPLE__
@@ -1261,6 +1263,9 @@ rsync_getopt(int argc, char *argv[], rsync_option_filter *filter,
 #if HAVE_NETATALK
 		case OP_NETATALK:
 			netatalk_active = 1;
+			break;
+		case OP_NO_NETATALK:
+			netatalk_active = 0;
 			break;
 #endif
 		case OP_EXECUTABILITY:
@@ -2008,6 +2013,11 @@ main(int argc, char *argv[])
 	setlocale(LC_ALL, "");
 	setlocale(LC_CTYPE, "");
 	setlocale(LC_NUMERIC, "");
+
+#ifdef __MACOS_CLASSIC__
+	/* Resource forks come from netatalk-style sidecars unless told not. */
+	netatalk_active = 1;
+#endif
 
 	if (rsync_getopt(argc, argv, NULL, NULL) == NULL) {
 		usage(ERR_SYNTAX);

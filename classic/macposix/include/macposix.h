@@ -71,6 +71,8 @@ char	*mp_realpath(const char *, char *);
 int	mp_mkstemp(char *);
 int	mp_mkstempat(int, char *);
 int	mp_tmpfd(void);
+/* Absolute, normalized form of a path that need not exist. */
+int	mp_abspath(const char *, char *);
 
 /* Times: HFS has 1-second dates in local time; see time.c. */
 #ifndef UTIME_NOW
@@ -365,6 +367,8 @@ int	mp_pipe(int [2]);
 
 /* Called often in long loops: lets the Mac breathe and checks Cmd-. */
 void	mp_yield(void);
+int	mp_vsnprintf(char *, size_t, const char *, va_list);
+extern int mp_tracing;
 
 /* ---- syslog: goes to the console window ----------------------------- */
 
@@ -514,7 +518,6 @@ char	*mp_readpassphrase(const char *, char *, size_t, int);
 #define getcwd		mp_getcwd
 #define realpath	mp_realpath
 #define mkstemp		mp_mkstemp
-#define mkstempat	mp_mkstempat
 #define utimensat	mp_utimensat
 #define futimens	mp_futimens
 #define utimes		mp_utimes

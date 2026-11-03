@@ -370,6 +370,15 @@ mp_cat_to_stat(const struct mp_node *n, struct stat *st)
 	st->st_atime = st->st_mtime;
 }
 
+/* Absolute, normalized form of path (need not exist). */
+int
+mp_abspath(const char *path, char *out)
+{
+	if (init_cwd() == -1)
+		return -1;
+	return normalize(cwd.path, path, out);
+}
+
 /* ---- current directory ---------------------------------------------- */
 
 int

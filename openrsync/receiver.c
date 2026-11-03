@@ -885,6 +885,10 @@ rsync_receiver(struct sess *sess, struct cleanup_ctx *cleanup_ctx,
 	if (dfd != -1)
 		LOG3("%s: root directory opened", root);
 
+#ifdef __MACOS_CLASSIC__
+	/* Map the server's names to HFS names (mangling, collisions). */
+	classic_register_names(root, fl, flsz);
+#endif
 #if HAVE_NETATALK
 	netatalk_clear_stale(sess, dfd, fl, flsz);
 #endif

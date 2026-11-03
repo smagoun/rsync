@@ -454,6 +454,7 @@ mp_poll(struct pollfd *pfd, nfds_t n, int timeout)
 	nfds_t i;
 	int ready;
 
+	MPTRACE("[poll n=%u t=%d]", (unsigned)n, timeout);
 	deadline = TickCount() + (timeout < 0 ? 0 :
 	    ((unsigned long)timeout * 60 + 999) / 1000);
 	for (;;) {

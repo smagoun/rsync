@@ -19,6 +19,12 @@
 #define kDontCreateFolder	false
 #define afpAccessDenied		(-5000)
 
+/* ---- tracing (front end: "trace on") ---- */
+
+extern int mp_tracing;
+void	mp_trace(const char *, ...);
+#define MPTRACE(...) do { if (mp_tracing) mp_trace(__VA_ARGS__); } while (0)
+
 /* ---- errors ---------------------------------------------------------- */
 
 /* Set errno from an OSErr and return -1 (or the OSErr if 0 -> 0). */

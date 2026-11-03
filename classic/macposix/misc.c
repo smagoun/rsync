@@ -6,11 +6,62 @@
 #include "mpint.h"
 
 #include <glob.h>
+#include <reent.h>
 #include <grp.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ---- tracing ---------------------------------------------------------- */
+
+int mp_tracing;
+
+void
+mp_trace(const char *fmt, ...)
+{
+	char buf[512];
+	va_list ap;
+	long n;
+
+	va_start(ap, fmt);
+	n = mp_vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n > (long)sizeof(buf) - 1)
+		n = sizeof(buf) - 1;
+	_consolewrite(2, buf, (size_t)n);
+}
+
+/* ---- entropy ------------------------------------------------------------ */
+
+/*
+ * newlib's arc4random() (used for temp file names) needs getentropy(),
+ * which Retro68 stubs out with ENOSYS; arc4random then raises SIGKILL,
+ * which ends the application silently.  Provide something: the clock,
+ * the tick count and a counter, mixed.  Nothing here needs to be
+ * cryptographically strong (rsync uses it for temporary file names).
+ */
+int
+__wrap__getentropy_r(struct _reent *r, void *buf, size_t len)
+{
+	static uint32_t state, counter;
+	unsigned char *p = buf;
+	size_t i;
+
+	(void)r;
+	if (state == 0) {
+		GetDateTime((unsigned long *)&state);
+		state ^= TickCount() * 2654435761u;
+	}
+	for (i = 0; i < len; i++) {
+		state ^= TickCount() + (++counter * 0x9E3779B9u);
+		state ^= state << 13;
+		state ^= state >> 17;
+		state ^= state << 5;
+		p[i] = (unsigned char)(state >> 11);
+	}
+	return 0;
+}
 
 /* ---- yielding -------------------------------------------------------- */
 

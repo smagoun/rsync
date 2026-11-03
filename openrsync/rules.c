@@ -565,6 +565,25 @@ ruleset_free(struct ruleset *ruleset)
 }
 
 
+#ifdef __MACOS_CLASSIC__
+/*
+ * The Classic Mac OS front end runs several transfers in one process;
+ * forget the previous command's filter rules (nothing is sent anywhere).
+ */
+void
+rules_reset(void)
+{
+	size_t i;
+
+	for (i = 0; i < global_ruleset.numrules; i++)
+		free(global_ruleset.rules[i].pattern);
+	free(global_ruleset.rules);
+	memset(&global_ruleset, 0, sizeof(global_ruleset));
+	global_ruleset.lclear = (size_t)-1;
+	rule_dir_depth = 0;
+}
+#endif
+
 static void
 ruleset_do_merge(struct ruleset *ruleset, const char *path, int modifiers, int delim)
 {

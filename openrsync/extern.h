@@ -1297,6 +1297,9 @@ xfer_log_level(struct sess *sess)
 	return (LT_LOG);
 }
 
+#ifdef __MACOS_CLASSIC__
+void	classic_register_names(const char *, const struct flist *, size_t);
+#endif
 #include "netatalk_vfs.h"
 
 #endif /*!EXTERN_H*/

@@ -29,6 +29,8 @@ mp_fstatat(int dirfd, const char *path, struct stat *st, int flags)
 {
 	struct mp_node n;
 
+	MPTRACE("[fstatat %d %s]\n", dirfd, path);
+
 	(void)flags;	/* no symlinks on HFS (aliases are plain files) */
 	if (lookup(dirfd, path, &n) == -1)
 		return -1;
@@ -79,6 +81,8 @@ mp_mkdirat(int dirfd, const char *path, mode_t mode)
 	long newid;
 	OSErr err;
 
+	MPTRACE("[mkdirat %d %s]\n", dirfd, path);
+
 	(void)mode;
 	if (mp_resolve(dirfd, path, &n) == -1)
 		return -1;
@@ -104,6 +108,9 @@ mp_unlinkat(int dirfd, const char *path, int flags)
 	struct mp_node n;
 	FSSpec spec;
 	OSErr err;
+	int fd;
+
+	MPTRACE("[unlinkat %d %s]\n", dirfd, path);
 
 	if (lookup(dirfd, path, &n) == -1)
 		return -1;
@@ -120,6 +127,15 @@ mp_unlinkat(int dirfd, const char *path, int flags)
 	if (err == fBsyErr && n.isdir) {
 		errno = ENOTEMPTY;
 		return -1;
+	}
+	if (err == fBsyErr && (fd = mp_fd_for_node(&n)) != -1) {
+		/*
+		 * POSIX lets an open file be unlinked; HFS does not.  We
+		 * opened it ourselves (rsync unlinks temp files it still
+		 * holds), so delete it when the last descriptor closes.
+		 */
+		mp_fdget(fd)->delete_on_close = 1;
+		return 0;
 	}
 	if (n.isdir)
 		mp_dircache_flush();
@@ -211,6 +227,8 @@ mp_renameat(int ofd, const char *opath, int nfd, const char *npath)
 	FSSpec fs, dir;
 	Str63 tmpname;
 	OSErr err;
+
+	MPTRACE("[rename %s -> %s]\n", opath, npath);
 
 	if (lookup(ofd, opath, &from) == -1)
 		return -1;
@@ -305,6 +323,8 @@ mp_utimensat(int dirfd, const char *path, const struct timespec ts[2],
 {
 	struct mp_node n;
 	time_t t;
+
+	MPTRACE("[utimensat %d %s]\n", dirfd, path);
 
 	(void)flags;
 	if (lookup(dirfd, path, &n) == -1)
