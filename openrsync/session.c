@@ -16,6 +16,8 @@
  */
 #include "config.h"
 
+#include <sys/time.h>
+
 #include <assert.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -44,6 +46,38 @@ stats_log_fixup(const size_t bufsz, char *buf)
 	}
 }
 
+static struct timeval stats_start_tv;
+
+/* Start the clock for the "bytes/sec" figure; main() calls this. */
+void
+sess_stats_start(void)
+{
+	gettimeofday(&stats_start_tv, NULL);
+}
+
+/*
+ * Seconds to divide the byte count by.  Only the sender times the data
+ * transfer (xfer_time); a receiver (any pull) has 0 there and used to
+ * divide by 0.1 ms, printing absurd rates.  Like rsync, fall back to the
+ * time since the run started.
+ */
+static double
+stats_seconds(const struct sess *sess)
+{
+	struct timeval now, d;
+	double s;
+
+	if (sess->xfer_time > 0)
+		s = sess->xfer_time / 1000.0;
+	else if (stats_start_tv.tv_sec != 0) {
+		gettimeofday(&now, NULL);
+		timersub(&now, &stats_start_tv, &d);
+		s = d.tv_sec + d.tv_usec / 1000000.0;
+	} else
+		s = 0;
+	return s < 0.001 ? 0.001 : s;
+}
+
 /*
  * Accept how much we've read, written, and file-size, and print them in
  * a human-readable fashion (with GB, MB, etc. prefixes).
@@ -61,7 +95,7 @@ stats_log(struct sess *sess,
 		char rbuf[32], wbuf[32], sbuf[32], ratebuf[32];
 		int64_t rate;
 
-		rate = (tread + twrite) / ((sess->xfer_time + 0.1) / 1000);
+		rate = (tread + twrite) / stats_seconds(sess);
 
 		rsync_humanize(sess, rbuf, sizeof(rbuf), tread);
 		rsync_humanize(sess, wbuf, sizeof(wbuf), twrite);

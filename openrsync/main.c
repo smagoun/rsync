@@ -2025,6 +2025,8 @@ main(int argc, char *argv[])
 	struct fargs	*fargs;
 	char		**args;
 
+	sess_stats_start();
+
 	/* We cannot safely log to stdout until we are certain that we're
 	 * the client (i.e., the server must enable multiplexing before
 	 * logging to stdout).

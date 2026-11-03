@@ -1251,6 +1251,7 @@ int		 rmatch(const char *, const char *, int);
 char		*symlink_read(const char *, size_t);
 char		*symlinkat_read(int, const char *, size_t);
 
+void		 sess_stats_start(void);
 int		 sess_stats_send(struct sess *, int);
 int		 sess_stats_recv(struct sess *, int);
 void		 sess_cleanup(struct sess *);
