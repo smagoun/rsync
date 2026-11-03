@@ -63,6 +63,18 @@ __wrap__getentropy_r(struct _reent *r, void *buf, size_t len)
 	return 0;
 }
 
+/*
+ * Older newlib (Retro68 with GCC 12) calls getentropy() directly and has
+ * no definition of it; newer newlib defines it on top of _getentropy_r.
+ * Defining it here serves both: the linker takes ours, and newer libc's
+ * own (alone in its object file) is then never pulled in.
+ */
+int
+getentropy(void *buf, size_t len)
+{
+	return __wrap__getentropy_r(NULL, buf, len);
+}
+
 /* ---- yielding -------------------------------------------------------- */
 
 /*
