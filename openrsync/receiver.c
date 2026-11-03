@@ -885,6 +885,10 @@ rsync_receiver(struct sess *sess, struct cleanup_ctx *cleanup_ctx,
 	if (dfd != -1)
 		LOG3("%s: root directory opened", root);
 
+#if HAVE_NETATALK
+	netatalk_clear_stale(sess, dfd, fl, flsz);
+#endif
+
 	/*
 	 * Now that we have the root fd we can build the hardlinks table.
 	 * Use calloc() to allocate the hl array so as to minimize the

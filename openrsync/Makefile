@@ -21,6 +21,8 @@ OBJS	   = batch.o \
 	     misc.o \
 	     mkpath.o \
 	     mktemp.o \
+	     netatalk.o \
+	     netatalk_posix.o \
 	     platform.o \
 	     portable.o \
 	     receiver.o \

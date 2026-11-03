@@ -1297,4 +1297,6 @@ xfer_log_level(struct sess *sess)
 	return (LT_LOG);
 }
 
+#include "netatalk_vfs.h"
+
 #endif /*!EXTERN_H*/

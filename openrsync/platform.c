@@ -424,7 +424,10 @@ platform_flist_modify(const struct sess *sess, struct fl *fl)
 void
 platform_flist_received(struct sess *sess, struct flist *fl, size_t flsz)
 {
-
+#if HAVE_NETATALK
+	if (netatalk_active)
+		netatalk_flist_received(sess, fl, flsz);
+#endif
 }
 #endif
 
@@ -443,6 +446,11 @@ platform_move_file(const struct sess *sess, struct flist *fl,
     int fromfd, const char *fname, int tofd, const char *toname, int final,
     int skip_metadata)
 {
+#if HAVE_NETATALK
+	if (netatalk_active)
+		return netatalk_move_file(sess, fl, fromfd, fname, tofd,
+		    toname, final, skip_metadata);
+#endif
 
 	if (move_file(fromfd, fname, tofd, toname, final, skip_metadata) != 0) {
 		ERR("%s: move_file: %s", fname, toname);

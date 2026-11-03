@@ -62,6 +62,15 @@ struct {								\
 #define PORTABLE_GETOPT_RESET()	do { optreset = 1; optind = 1; } while (0)
 #endif
 
+/* --netatalk (netatalk.c); macOS has native forks and -E instead. */
+#ifndef HAVE_NETATALK
+#if defined(__APPLE__)
+#define HAVE_NETATALK 0
+#else
+#define HAVE_NETATALK 1
+#endif
+#endif
+
 #if !defined(__APPLE__) && !defined(__FreeBSD__)
 #define PORTABLE_NEED_SBUF 1
 #define PORTABLE_NEED_HUMANIZE 1

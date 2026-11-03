@@ -945,6 +945,7 @@ enum {
 	OP_STATS,
 	OP_COMPLEVEL,
 	OP_EXECUTABILITY,
+	OP_NETATALK,
 	OP_LISTONLY,
 	OP_PFLISTSZ,
 
@@ -993,6 +994,9 @@ const struct option	 rsync_lopts[] = {
     { "exclude",	required_argument, NULL,		OP_EXCLUDE },
     { "exclude-from",	required_argument, NULL,		OP_EXCLUDE_FROM },
     { "executability",	no_argument,	NULL,			OP_EXECUTABILITY },
+#if HAVE_NETATALK
+    { "netatalk",	no_argument,	NULL,			OP_NETATALK },
+#endif
     { "existing",	no_argument, NULL,			OP_IGNORE_NON_EXISTING },
 #ifdef __APPLE__
     { "extended-attributes",	no_argument, NULL,		'E' },
@@ -1253,6 +1257,11 @@ rsync_getopt(int argc, char *argv[], rsync_option_filter *filter,
 #else
 		case 'E':
 			/* fallthru */
+#endif
+#if HAVE_NETATALK
+		case OP_NETATALK:
+			netatalk_active = 1;
+			break;
 #endif
 		case OP_EXECUTABILITY:
 			opts.preserve_executability = 1;
@@ -1827,6 +1836,15 @@ basedir:
 			}
 		}
 	}
+#if HAVE_NETATALK
+	if (netatalk_active) {
+		if (opts.inplace || opts.append)
+			errx(ERR_SYNTAX,
+			    "--netatalk cannot be combined with --inplace or --append");
+		if (netatalk_add_rules() == -1)
+			errx(ERR_SYNTAX, "--netatalk: bad built-in filter rule");
+	}
+#endif
 	if (opts.append && opts.whole_file > 0) {
 		errx(ERR_SYNTAX,
 		    "options --append and --whole-file cannot be combined");
