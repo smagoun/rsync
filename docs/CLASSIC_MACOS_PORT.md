@@ -1,6 +1,6 @@
 # Plan: rsync for Classic Mac OS 8.1 with resource-fork support
 
-Status: **plan, revision 5** (netatalk behaviour measured on the owner's server). Nothing is implemented yet.
+Status: **plan, revision 6.** Phases 0–3 are done, and most of Phase 4 works in QEMU. See [`classic/README.md`](../classic/README.md) for what runs today and what's missing.
 
 ## 0. Decisions so far
 
@@ -313,6 +313,19 @@ So:
 * **Option C: keep the network trusted.** Use a LAN segment, or a VPN or WireGuard tunnel ending on a router or Pi in front of the Mac. This needs no code.
 
 ## 9. Phases (revised)
+
+Progress so far:
+
+| Phase | State |
+|---|---|
+| 0 | **Done.** Retro68 (68k) builds. QEMU q800 boots the owner's Mac OS 8.1 image unattended. `nettest` connects to an rsync daemon over MacTCP. Not yet measured: MD4 speed and TCP throughput |
+| 1 | **Done.** openrsync builds on Linux (`portable.c`) and for 68k (`classic/rsync/config.h`, macposix). The daemon-client pull path needs no fork. Not done: local mode over threads |
+| 2 | **Done.** `--netatalk` is implemented as a virtual `._name` layer, not as file-list rewriting (§3.2). `classic/tests/netatalk_test.sh` passes against a stock rsync 3.2.7 daemon. Out of scope: the `.AppleDouble/` v2 layout |
+| 3 | **Done.** macposix covers files, directories, rename that keeps forks, times, MacTCP sockets and `poll`. `hfsname.c` handles names. `mptest` passes 50/50 in QEMU. Not working: MacTCP DNR host-name lookup |
+| 4 | **Mostly working.** In QEMU: pull with forks and Finder info, no-op second run, fork-only and data-only updates, `--delete`, MacRoman and long names. Not done: DST tolerance; tests on real hardware and on the owner's netatalk server |
+| 5 | **Started.** The prompt, `$(VAR)` from `rsync prefs`, HFS path arguments, and MacRoman console output work. Not done: profiles, drag and drop, Cmd-., `--mac-types`, `--mac-text` |
+| 6–8 | Not started |
+
 
 | Phase | Work | Exit criterion |
 |---|---|---|
