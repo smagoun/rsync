@@ -1181,6 +1181,7 @@ rsync_socket(struct cleanup_ctx *cleanup_ctx, const struct opts *opts,
 		}
 
 		LOG2("client starting receiver: %s", f->host);
+		sess.lreceiver = true;	/* itemize: received files show '>' */
 		if (sink == NULL) {
 			/*
 			 * --list-only mode, just fake something.
