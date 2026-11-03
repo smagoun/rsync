@@ -43,7 +43,8 @@ enum {
 	MTinsufficientResources = -23009,
 	MTconnectionTerminated = -23012,
 	MTopenFailed = -23015,
-	MTcommandTimeout = -23016
+	MTcommandTimeout = -23016,
+	MTcacheFault = -23042		/* DNR: answer not cached, keep waiting */
 };
 
 /* connectionState */

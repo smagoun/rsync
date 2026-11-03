@@ -703,7 +703,7 @@ mp_inet_ntop(int af, const void *src, char *dst, socklen_t len)
 #define DNR_OPEN	1
 #define DNR_STRTOADDR	3
 
-struct hostInfo {
+struct mp_hostinfo {
 	long		rtnCode;
 	char		cname[255];
 	unsigned long	addr[4];
@@ -713,7 +713,7 @@ typedef long (*dnr_proc)(long, ...);
 static dnr_proc dnr;
 
 static pascal void
-dnr_done(struct hostInfo *hi, char *user)
+dnr_done(struct mp_hostinfo *hi, char *user)
 {
 	(void)hi;
 	*(volatile int *)user = 1;
@@ -768,7 +768,7 @@ dnr_open(void)
 static int
 dnr_lookup(const char *name, in_addr_t *addr)
 {
-	static struct hostInfo hi;
+	static struct mp_hostinfo hi;
 	volatile int done = 0;
 	unsigned long start;
 
@@ -776,7 +776,7 @@ dnr_lookup(const char *name, in_addr_t *addr)
 		return EAI_FAIL;
 	memset(&hi, 0, sizeof(hi));
 	if ((short)dnr(DNR_STRTOADDR, name, &hi, dnr_done, (char *)&done) ==
-	    cacheFault) {
+	    MTcacheFault) {
 		start = TickCount();
 		while (!done && TickCount() - start < 60 * 30)
 			mp_yield();
