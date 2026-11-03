@@ -10,6 +10,7 @@
  * so other applications keep running, and stop with EINTR on Cmd-.
  */
 #include "mpint.h"
+#include "mactcp.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -17,17 +18,17 @@
 #define RCVBUF_SIZE	32768
 
 struct mp_sock {
-	StreamPtr	stream;
+	MTStreamPtr	stream;
 	Ptr		rbuf;
 	int		connected;
 	int		rdshut;		/* remote closed, nothing left */
-	ip_addr		rhost;
-	tcp_port	rport;
+	MTip_addr		rhost;
+	MTtcp_port	rport;
 	/* listening sockets */
 	int		listening;
-	tcp_port	lport;		/* from bind() */
+	MTtcp_port	lport;		/* from bind() */
 	int		pending;	/* passive open outstanding in ppb */
-	TCPiopb		ppb;
+	MTTCPiopb		ppb;
 };
 
 static short drv;
@@ -53,7 +54,7 @@ open_driver(void)
 }
 
 static OSErr
-tcp(TCPiopb *pb, short code, StreamPtr s)
+tcp(MTTCPiopb *pb, short code, MTStreamPtr s)
 {
 	pb->ioCRefNum = drv;
 	pb->csCode = code;
@@ -67,24 +68,24 @@ tcperr(OSErr err)
 	switch (err) {
 	case noErr:
 		return 0;
-	case openFailed:
-	case connectionTerminated:
+	case MTopenFailed:
+	case MTconnectionTerminated:
 		errno = ECONNREFUSED;
 		break;
-	case commandTimeout:
+	case MTcommandTimeout:
 		errno = ETIMEDOUT;
 		break;
-	case connectionClosing:
-	case connectionDoesntExist:
+	case MTconnectionClosing:
+	case MTconnectionDoesntExist:
 		errno = EPIPE;
 		break;
-	case insufficientResources:
+	case MTinsufficientResources:
 		errno = ENOBUFS;
 		break;
-	case ipBadLapErr:
-	case ipBadCnfgErr:
-	case ipNoCnfgErr:
-	case ipLoadErr:
+	case MTipBadLapErr:
+	case MTipBadCnfgErr:
+	case MTipNoCnfgErr:
+	case MTipLoadErr:
 		errno = ENETDOWN;
 		break;
 	default:
@@ -100,7 +101,7 @@ tcperr(OSErr err)
 static int
 new_stream(struct mp_sock *s)
 {
-	TCPiopb pb;
+	MTTCPiopb pb;
 	OSErr err;
 
 	if ((s->rbuf = NewPtr(RCVBUF_SIZE)) == NULL) {
@@ -110,7 +111,7 @@ new_stream(struct mp_sock *s)
 	memset(&pb, 0, sizeof(pb));
 	pb.csParam.create.rcvBuff = s->rbuf;
 	pb.csParam.create.rcvBuffLen = RCVBUF_SIZE;
-	if ((err = tcp(&pb, TCPCreate, NULL)) != noErr) {
+	if ((err = tcp(&pb, MTTCPCreate, NULL)) != noErr) {
 		DisposePtr(s->rbuf);
 		s->rbuf = NULL;
 		return tcperr(err);
@@ -169,7 +170,7 @@ mp_connect(int fd, const struct sockaddr *sa, socklen_t len)
 {
 	const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
 	struct mp_sock *s;
-	TCPiopb pb;
+	MTTCPiopb pb;
 	OSErr err;
 
 	if ((s = sock(fd)) == NULL)
@@ -183,9 +184,9 @@ mp_connect(int fd, const struct sockaddr *sa, socklen_t len)
 	pb.csParam.open.remotePort = sin->sin_port;
 	pb.csParam.open.ulpTimeoutValue = 60;
 	pb.csParam.open.ulpTimeoutAction = 1;	/* abort */
-	pb.csParam.open.validityFlags = timeoutValue | timeoutAction;
+	pb.csParam.open.validityFlags = MTtimeoutValue | MTtimeoutAction;
 	pb.csParam.open.commandTimeoutValue = 30;
-	if ((err = tcp(&pb, TCPActiveOpen, s->stream)) != noErr)
+	if ((err = tcp(&pb, MTTCPActiveOpen, s->stream)) != noErr)
 		return tcperr(err);
 	s->connected = 1;
 	s->rhost = sin->sin_addr.s_addr;
@@ -194,17 +195,17 @@ mp_connect(int fd, const struct sockaddr *sa, socklen_t len)
 }
 
 static int
-status(struct mp_sock *s, TCPiopb *pb)
+status(struct mp_sock *s, MTTCPiopb *pb)
 {
 	memset(pb, 0, sizeof(*pb));
-	return tcp(pb, TCPStatus, s->stream);
+	return tcp(pb, MTTCPStatus, s->stream);
 }
 
 /* Bytes waiting; sets *closed when the peer has finished sending. */
 static long
 unread(struct mp_sock *s, int *closed)
 {
-	TCPiopb pb;
+	MTTCPiopb pb;
 	Byte st;
 
 	*closed = 0;
@@ -213,7 +214,7 @@ unread(struct mp_sock *s, int *closed)
 		return 0;
 	}
 	st = pb.csParam.status.connectionState;
-	if (st != TCPSEstablished && st != TCPSFinWait1 && st != TCPSFinWait2)
+	if (st != MTTCPSEstablished && st != MTTCPSFinWait1 && st != MTTCPSFinWait2)
 		*closed = 1;	/* CloseWait etc.: peer sent FIN */
 	return pb.csParam.status.amtUnreadData;
 }
@@ -221,7 +222,7 @@ unread(struct mp_sock *s, int *closed)
 ssize_t
 mp_sock_read(struct mp_sock *s, void *buf, size_t len)
 {
-	TCPiopb pb;
+	MTTCPiopb pb;
 	long avail;
 	int closed;
 	OSErr err;
@@ -250,8 +251,8 @@ mp_sock_read(struct mp_sock *s, void *buf, size_t len)
 	pb.csParam.receive.commandTimeoutValue = 1;
 	pb.csParam.receive.rcvBuff = buf;
 	pb.csParam.receive.rcvBuffLen = (uint16_t)len;
-	err = tcp(&pb, TCPRcv, s->stream);
-	if (err == connectionClosing || err == connectionTerminated) {
+	err = tcp(&pb, MTTCPRcv, s->stream);
+	if (err == MTconnectionClosing || err == MTconnectionTerminated) {
 		s->rdshut = 1;
 		return 0;
 	}
@@ -263,8 +264,8 @@ mp_sock_read(struct mp_sock *s, void *buf, size_t len)
 ssize_t
 mp_sock_write(struct mp_sock *s, const void *buf, size_t len)
 {
-	wdsEntry wds[2];
-	TCPiopb pb;
+	MTwdsEntry wds[2];
+	MTTCPiopb pb;
 	size_t chunk;
 	OSErr err;
 
@@ -280,10 +281,10 @@ mp_sock_write(struct mp_sock *s, const void *buf, size_t len)
 	memset(&pb, 0, sizeof(pb));
 	pb.csParam.send.ulpTimeoutValue = 60;
 	pb.csParam.send.ulpTimeoutAction = 1;
-	pb.csParam.send.validityFlags = timeoutValue | timeoutAction;
+	pb.csParam.send.validityFlags = MTtimeoutValue | MTtimeoutAction;
 	pb.csParam.send.pushFlag = 1;
 	pb.csParam.send.wdsPtr = (Ptr)wds;
-	if ((err = tcp(&pb, TCPSend, s->stream)) != noErr)
+	if ((err = tcp(&pb, MTTCPSend, s->stream)) != noErr)
 		return tcperr(err);
 	return (ssize_t)chunk;
 }
@@ -291,7 +292,7 @@ mp_sock_write(struct mp_sock *s, const void *buf, size_t len)
 int
 mp_sock_close(struct mp_sock *s)
 {
-	TCPiopb pb;
+	MTTCPiopb pb;
 
 	if (s->stream == NULL) {
 		free(s);
@@ -300,18 +301,18 @@ mp_sock_close(struct mp_sock *s)
 	if (s->pending) {
 		/* Cancel the outstanding passive open. */
 		memset(&pb, 0, sizeof(pb));
-		tcp(&pb, TCPAbort, s->stream);
-		while (s->ppb.ioResult == inProgress)
+		tcp(&pb, MTTCPAbort, s->stream);
+		while (s->ppb.ioResult == MTinProgress)
 			mp_yield();
 	}
 	if (s->connected) {
 		memset(&pb, 0, sizeof(pb));
 		pb.csParam.close.ulpTimeoutValue = 10;
-		pb.csParam.close.validityFlags = timeoutValue;
-		tcp(&pb, TCPClose, s->stream);
+		pb.csParam.close.validityFlags = MTtimeoutValue;
+		tcp(&pb, MTTCPClose, s->stream);
 	}
 	memset(&pb, 0, sizeof(pb));
-	tcp(&pb, TCPRelease, s->stream);
+	tcp(&pb, MTTCPRelease, s->stream);
 	DisposePtr(s->rbuf);
 	free(s);
 	return 0;
@@ -347,15 +348,15 @@ int
 mp_shutdown(int fd, int how)
 {
 	struct mp_sock *s;
-	TCPiopb pb;
+	MTTCPiopb pb;
 
 	if ((s = sock(fd)) == NULL)
 		return -1;
 	if (how == SHUT_WR || how == SHUT_RDWR) {
 		memset(&pb, 0, sizeof(pb));
 		pb.csParam.close.ulpTimeoutValue = 10;
-		pb.csParam.close.validityFlags = timeoutValue;
-		tcp(&pb, TCPClose, s->stream);
+		pb.csParam.close.validityFlags = MTtimeoutValue;
+		tcp(&pb, MTTCPClose, s->stream);
 	}
 	return 0;
 }
@@ -472,11 +473,11 @@ arm(struct mp_sock *s)
 		return 0;
 	memset(&s->ppb, 0, sizeof(s->ppb));
 	s->ppb.ioCRefNum = drv;
-	s->ppb.csCode = TCPPassiveOpen;
+	s->ppb.csCode = MTTCPPassiveOpen;
 	s->ppb.tcpStream = s->stream;
 	s->ppb.csParam.open.ulpTimeoutValue = 60;
 	s->ppb.csParam.open.ulpTimeoutAction = 1;
-	s->ppb.csParam.open.validityFlags = timeoutValue | timeoutAction;
+	s->ppb.csParam.open.validityFlags = MTtimeoutValue | MTtimeoutAction;
 	s->ppb.csParam.open.commandTimeoutValue = 0;	/* wait forever */
 	s->ppb.csParam.open.localPort = s->lport;
 	if ((err = PBControlAsync((ParmBlkPtr)&s->ppb)) != noErr)
@@ -503,7 +504,7 @@ accept_ready(struct mp_sock *s)
 {
 	if (!s->pending && arm(s) == -1)
 		return 1;	/* report the error through accept() */
-	return s->ppb.ioResult != inProgress;
+	return s->ppb.ioResult != MTinProgress;
 }
 
 int
@@ -650,7 +651,7 @@ mp_local_ip(void)
 		return 0;
 	memset(&pb, 0, sizeof(pb));
 	pb.ioCRefNum = drv;
-	pb.csCode = ipctlGetAddr;
+	pb.csCode = MTipctlGetAddr;
 	if (PBControlSync((ParmBlkPtr)&pb) != noErr)
 		return 0;
 	return pb.ourAddress;

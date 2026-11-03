@@ -7,7 +7,8 @@
  *   Apple's Universal Interfaces (when installed while building
  *	Retro68): one header per manager.
  *
- * The port is built and tested with Multiversal.
+ * The port is built and tested with Multiversal.  MacTCP is declared
+ * separately (mactcp.h), the same way under both.
  */
 #ifndef MACTOOLBOX_H
 #define MACTOOLBOX_H
@@ -42,7 +43,7 @@
 #include <Scrap.h>
 #include <StandardFile.h>
 #include <Sound.h>
-#include <MacTCP.h>
+#include <ShutDown.h>
 #endif
 
 #endif /* MACTOOLBOX_H */

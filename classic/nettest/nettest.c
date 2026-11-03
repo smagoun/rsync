@@ -10,6 +10,7 @@
  * so the test can run unattended from Startup Items.
  */
 #include "mactoolbox.h"
+#include "mactcp.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -67,7 +68,7 @@ static void readConfig(unsigned long *ip, unsigned short *port)
 	}
 }
 
-static OSErr tcpCall(TCPiopb *pb, short refNum, short code)
+static OSErr tcpCall(MTTCPiopb *pb, short refNum, short code)
 {
 	pb->ioCRefNum = refNum;
 	pb->csCode = code;
@@ -75,10 +76,10 @@ static OSErr tcpCall(TCPiopb *pb, short refNum, short code)
 }
 
 /* Receive whatever arrives within `secs` seconds; returns bytes read. */
-static long tcpRecv(short drv, StreamPtr s, char *buf, unsigned short len,
+static long tcpRecv(short drv, MTStreamPtr s, char *buf, unsigned short len,
     Byte secs)
 {
-	TCPiopb pb;
+	MTTCPiopb pb;
 	OSErr err;
 
 	memset(&pb, 0, sizeof pb);
@@ -86,18 +87,18 @@ static long tcpRecv(short drv, StreamPtr s, char *buf, unsigned short len,
 	pb.csParam.receive.commandTimeoutValue = secs;
 	pb.csParam.receive.rcvBuff = buf;
 	pb.csParam.receive.rcvBuffLen = len;
-	err = tcpCall(&pb, drv, TCPRcv);
+	err = tcpCall(&pb, drv, MTTCPRcv);
 	if (err != noErr) {
 		logmsg("  TCPRcv: err %d\n", err);
-		return err == commandTimeout ? 0 : -1;
+		return err == MTcommandTimeout ? 0 : -1;
 	}
 	return pb.csParam.receive.rcvBuffLen;
 }
 
-static OSErr tcpSendStr(short drv, StreamPtr s, const char *str)
+static OSErr tcpSendStr(short drv, MTStreamPtr s, const char *str)
 {
-	TCPiopb pb;
-	wdsEntry wds[2];
+	MTTCPiopb pb;
+	MTwdsEntry wds[2];
 
 	wds[0].length = strlen(str);
 	wds[0].ptr = (Ptr)str;
@@ -107,15 +108,15 @@ static OSErr tcpSendStr(short drv, StreamPtr s, const char *str)
 	pb.tcpStream = s;
 	pb.csParam.send.wdsPtr = (Ptr)wds;
 	pb.csParam.send.pushFlag = 1;
-	return tcpCall(&pb, drv, TCPSend);
+	return tcpCall(&pb, drv, MTTCPSend);
 }
 
 int main(void)
 {
 	short drv;
 	OSErr err;
-	TCPiopb pb;
-	StreamPtr stream;
+	MTTCPiopb pb;
+	MTStreamPtr stream;
 	Ptr rbuf;
 	unsigned long ip;
 	unsigned short port = 8873;
@@ -139,7 +140,7 @@ int main(void)
 	memset(&pb, 0, sizeof pb);
 	pb.csParam.create.rcvBuff = rbuf;
 	pb.csParam.create.rcvBuffLen = 16384;
-	err = tcpCall(&pb, drv, TCPCreate);
+	err = tcpCall(&pb, drv, MTTCPCreate);
 	stream = pb.tcpStream;
 	logmsg("TCPCreate = %d\n", err);
 	if (err != noErr)
@@ -151,10 +152,10 @@ int main(void)
 	pb.csParam.open.remotePort = port;
 	pb.csParam.open.ulpTimeoutValue = 30;
 	pb.csParam.open.ulpTimeoutAction = 1;	/* abort */
-	pb.csParam.open.validityFlags = timeoutValue | timeoutAction;
+	pb.csParam.open.validityFlags = MTtimeoutValue | MTtimeoutAction;
 	pb.csParam.open.commandTimeoutValue = 30;
 	t0 = TickCount();
-	err = tcpCall(&pb, drv, TCPActiveOpen);
+	err = tcpCall(&pb, drv, MTTCPActiveOpen);
 	logmsg("TCPActiveOpen = %d (%ld ticks)\n", err, TickCount() - t0);
 	if (err != noErr)
 		goto release;
@@ -180,11 +181,11 @@ int main(void)
 
 	memset(&pb, 0, sizeof pb);
 	pb.tcpStream = stream;
-	logmsg("TCPClose = %d\n", tcpCall(&pb, drv, TCPClose));
+	logmsg("TCPClose = %d\n", tcpCall(&pb, drv, MTTCPClose));
 release:
 	memset(&pb, 0, sizeof pb);
 	pb.tcpStream = stream;
-	logmsg("TCPRelease = %d\n", tcpCall(&pb, drv, TCPRelease));
+	logmsg("TCPRelease = %d\n", tcpCall(&pb, drv, MTTCPRelease));
 done:
 	logmsg("NetTest: done\n");
 	if (logRef)

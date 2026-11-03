@@ -283,7 +283,7 @@ app_update_menus(void)
 	enable(menus[1], F_OPEN, sel >= 0);
 	c2p(server_wanted ? "Stop Server" : "Start Server", t);
 	SetMenuItemText(menus[4], V_TOGGLE, t);
-	CheckItem(menus[4], V_LAUNCH, pref_start_server);
+	CheckMenuItem(menus[4], V_LAUNCH, pref_start_server);
 }
 
 static void
