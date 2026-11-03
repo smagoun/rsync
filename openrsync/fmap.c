@@ -63,6 +63,7 @@ fmap_reraise(void)
 	raise(SIGBUS);
 }
 
+#ifndef __MACOS_CLASSIC__
 static void
 fmap_sigbus_handler(int sig, siginfo_t *siginfo,
     void *uap __attribute__((__unused__)))
@@ -92,9 +93,14 @@ fmap_sigbus_handler(int sig, siginfo_t *siginfo,
 	siglongjmp(fmap_signal_env, sig);
 }
 
+#endif /* !__MACOS_CLASSIC__ */
+
 static bool
 fmap_mmap_allowed(void)
 {
+#if defined(__MACOS_CLASSIC__)
+	return false;	/* no virtual memory mapping; always use bufio */
+#endif
 #if defined(__APPLE__) && TARGET_OS_WATCH
 	static int allowed = -1;
 
@@ -160,6 +166,7 @@ fmap_open_mmap(struct fmap *fm, const char *path, int fd, size_t sz)
 	 * will never force the signal to be handled and abort if we
 	 * can't handle it here.
 	 */
+#ifndef __MACOS_CLASSIC__
 	if (mapped_files++ == 0) {
 		struct sigaction act = { .sa_flags = SA_SIGINFO };
 
@@ -173,6 +180,7 @@ fmap_open_mmap(struct fmap *fm, const char *path, int fd, size_t sz)
 			return false;
 		}
 	}
+#endif
 
 	return true;
 }

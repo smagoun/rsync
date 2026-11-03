@@ -56,9 +56,9 @@ static const struct batchflag {
 };
 
 struct batchhdr {
-	int		flags;
-	int		rver;
-	int		seed;
+	int32_t		flags;
+	int32_t		rver;
+	int32_t		seed;
 };
 
 /*
