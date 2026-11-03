@@ -90,7 +90,7 @@
 #define HAVE_STRNLEN 1
 #define HAVE_STRTONUM 0
 #define HAVE_SYS_BYTEORDER_H 0
-#define HAVE_SYS_ENDIAN_H 1
+#define HAVE_SYS_ENDIAN_H 0	/* macposix.h defines htole32() etc. */
 #define HAVE_SYS_MKDEV_H 0
 #define HAVE_SYS_QUEUE 1
 #define HAVE_SYS_SYSMACROS_H 0
@@ -116,7 +116,10 @@
 /*
  * Make it easier to include endian.h forms.
  */
-#if HAVE_ENDIAN_H
+#if 1	/* Classic: macposix.h has the byte-order macros (not every newlib
+	 * Retro68 ships has sys/endian.h); any harmless header will do. */
+# define COMPAT_ENDIAN_H <stdint.h>
+#elif HAVE_ENDIAN_H
 # define COMPAT_ENDIAN_H <endian.h>
 #elif HAVE_SYS_ENDIAN_H
 # define COMPAT_ENDIAN_H <sys/endian.h>

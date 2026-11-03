@@ -42,7 +42,7 @@ struct daemon_refused {
 	size_t			 refused_loptsz;
 };
 
-enum daemon_state : unsigned char {
+enum daemon_state {	/* no ": unsigned char": C23, not in older GCC */
 	DSTATE_INIT,
 	DSTATE_CLIENT_CONTROL,
 	DSTATE_RUNNING,
