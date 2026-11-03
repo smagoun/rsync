@@ -187,7 +187,7 @@ copy_rsrc(const FSSpec *from, const FSSpec *to)
 		mp_yield();
 	}
 	FSClose(in);
-	if (FSClose(out) != noErr && err == noErr)
+	if (mp_rf_close(out) != noErr && err == noErr)
 		err = ioErr;
 	return mp_oserr(err);
 }

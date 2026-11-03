@@ -245,7 +245,7 @@ log_vwritef(enum log_type type, const char *fmt, va_list ap)
 			    log_sess->wbufmaxp, n))
 				return;
 
-			tagbuf = htole32(((tag + IOTAG_OFFSET) << 24) + n);
+			tagbuf = ((tag + IOTAG_OFFSET) << 24) + n;	/* LE below */
 
 			io_buffer_int(*wbufp, &pos, *wbufszp, tagbuf);
 			io_buffer_buf(*wbufp, &pos, *wbufszp, msgbuf, n);

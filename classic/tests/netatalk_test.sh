@@ -47,7 +47,11 @@ gid = $(id -g)
 [src]
     path = $SRV
     read only = yes
+[up]
+    path = $W/up
+    read only = no
 EOF
+mkdir -p $W/up
 rsync --daemon --config=$W/rsyncd.conf </dev/null >/dev/null 2>&1
 sleep 1
 
@@ -121,6 +125,19 @@ $MKAD "$SRV/._Orphan" TEXT ttxt $W/small.rsrc
 sync_ > $W/out9 2>&1
 check "orphan sidecar creates an empty file with the fork" \
     '[ -f $DST/Orphan ] && cmp -s $W/small.rsrc $DST/.rsrc/Orphan'
+
+echo "# 10. sending: forks go out as ._ sidecars"
+"$OPENRSYNC" -a --netatalk "$DST/" rsync://127.0.0.1:$PORT/up/ > $W/out10 2>&1 ||
+    { cat $W/out10; fail "push exit status"; }
+# (By now App is deleted and main.c's fork cleared; Orphan has a fork.)
+check "._Orphan sent as AppleDouble holding the fork" \
+    '[ "$(hex $W/up/._Orphan | cut -c1-8)" = "00051607" ] &&
+     tail -c +83 $W/up/._Orphan | cmp -s - $W/small.rsrc'
+check "._Orphan carries the Finder info (TEXT/ttxt)" \
+    '[ "$(dd if=$W/up/._Orphan bs=1 skip=50 count=8 2>/dev/null)" = TEXTttxt ]'
+check "backend folders not sent" '[ ! -e $W/up/.rsrc ] && [ ! -e $W/up/.finf ]'
+check "file without a fork has no sidecar" \
+    '[ -f $W/up/src/main.c ] && [ ! -e $W/up/src/._main.c ]'
 
 if [ $FAILS -ne 0 ]; then
 	echo "$FAILS test(s) failed; outputs in $W"

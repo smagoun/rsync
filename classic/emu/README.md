@@ -45,3 +45,12 @@ Checked on 7.1, with MacTCP 2.0.6 (address 10.0.2.15, gateway 10.0.2.2, name ser
 * **Pulls:** with resource forks and type/creator. A second run transfers nothing. `--delete` works on a 2,000-entry tree, with peak use of 0.8 MB.
 * **Pushes to the Mac's daemon:** work, and Cmd-. stops it.
 * **Startup Items:** 7.1's Finder opens every file in Startup Items, one after another, without waiting for the app to quit. So the scripts mark their helper files invisible, and an unattended run (one with `rsync autoquit`) creates `rsync log` invisible too.
+
+## Mac to Mac
+
+`try-mac2mac.sh` boots one VM as the server (`rsync --daemon`, module `incoming` at `/<volume>/Incoming`) and the other as a client running the given commands. QEMU's user networking gives each VM its own network, so the client reaches the server through the server's port forward on the host, `rsync://10.0.2.2:8730/incoming/`:
+
+    SERVER_DIR=emu CLIENT_DIR=emu/s71 classic/emu/try-mac2mac.sh \
+        'rsync -a "25 MB:Data:" rsync://10.0.2.2:8730/incoming/data/'
+
+`macbin.py` builds MacBinary test files with forks (`hcopy -m` them onto a disk image) and summarizes MacBinary files for comparing trees. `sum -m` ignores bytes 48–125 of the resource fork, where System 7.1 stores its own record.

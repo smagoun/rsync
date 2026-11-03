@@ -471,11 +471,17 @@ netatalk_flist_modify(const struct sess *sess, struct fl *fl)
 	char *ppath;
 	ptrdiff_t stripdir;
 	size_t i, insz = fl->sz;
+	int (*sent)(struct sess *, int, const struct flist *);
 
-	(void)sess;
+	/*
+	 * Every file with a fork or Finder info gets a "._name" entry, the
+	 * netatalk sidecar.  With -E, each entry is also followed by Apple's
+	 * extra byte, so a Mac's rsync -E unpacks them itself.
+	 */
+	sent = sess->opts->extended_attributes ? xattr_sent : NULL;
 	for (i = 0; i < insz; i++) {
 		f = &fl->flp[i];
-		f->sent = xattr_sent;
+		f->sent = sent;
 		if (!S_ISREG(f->st.mode) || netatalk_is_sidecar(f->path))
 			continue;
 		if (ntb_get(AT_FDCWD, f->path, &m) == -1 || !meta_present(&m))
@@ -499,7 +505,7 @@ netatalk_flist_modify(const struct sess *sess, struct fl *fl)
 			packed->st.mtime = m.sidecar_mtime;
 		packed->st.flags &= ~NT_HAS_SIDECAR;
 		packed->open = xattr_open;
-		packed->sent = xattr_sent;
+		packed->sent = sent;
 		f->st.flags |= NT_HAS_SIDECAR;
 	}
 	return 1;

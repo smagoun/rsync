@@ -416,7 +416,7 @@ int
 platform_flist_modify(const struct sess *sess, struct fl *fl)
 {
 #if HAVE_NETATALK
-	if (sess->opts->extended_attributes && netatalk_active)
+	if (netatalk_active)
 		return netatalk_flist_modify(sess, fl);
 #endif
 

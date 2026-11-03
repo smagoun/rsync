@@ -178,7 +178,7 @@ ntb_set(int dirfd, const char *path, const uint8_t finfo[AD_FINDERI_LEN],
 			err = FSWrite(ref, &cnt, buf);
 			mp_yield();
 		}
-		if (FSClose(ref) != noErr && err == noErr)
+		if (mp_rf_close(ref) != noErr && err == noErr)
 			err = ioErr;
 		if (err != noErr)
 			return mp_oserr(err);
@@ -224,7 +224,7 @@ ntb_clear(int dirfd, const char *path)
 		if ((err = FSpOpenRF(&spec, fsRdWrPerm, &ref)) != noErr)
 			return mp_oserr(err);
 		err = SetEOF(ref, 0);
-		FSClose(ref);
+		mp_rf_close(ref);
 		if (err != noErr)
 			return mp_oserr(err);
 	}

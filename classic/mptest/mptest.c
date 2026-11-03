@@ -190,6 +190,38 @@ test_names(void)
 	unlink("mpt/a:b");
 }
 
+/* Compare a file's resource fork with want[]; report the first difference. */
+static int
+fork_same(const char *path, const char *want, size_t len)
+{
+	extern void rcache_close(void);
+	static char got[4096];
+	ssize_t n;
+	size_t i;
+
+	n = ntb_read_rsrc(AT_FDCWD, path, got, sizeof(got), 0);
+	rcache_close();
+	if (n != (ssize_t)len) {
+		say("     fork read %ld bytes, want %lu\n", (long)n,
+		    (unsigned long)len);
+		return 0;
+	}
+	for (i = 0; i < len; i++)
+		if (got[i] != want[i] && (i < 48 || i > 125)) {
+			say("     fork differs from byte %lu\n", (unsigned long)i);
+			return 0;
+		}
+	/*
+	 * System 7.1 stamps a record (name, date, fork lengths) into bytes
+	 * 48-125 of any resource fork written through the File Manager, the
+	 * area the Resource Manager reserves for the system; flushing first
+	 * avoids it on 8.1 but not on 7.1 (see mp_rf_close()).
+	 */
+	if (memcmp(got + 48, want + 48, 78) != 0)
+		say("     (bytes 48-125 hold the system's record: System 7.1)\n");
+	return 1;
+}
+
 static void
 test_forks(void)
 {
@@ -213,6 +245,8 @@ test_forks(void)
 	    == 0 && m.rsrc_len == sizeof(rsrc) &&
 	    memcmp(m.finfo, "APPLTEST", 8) == 0 &&
 	    m.sidecar_mtime == 1650000000);
+	CHECK("fork contents read back", fork_same("mpt/a.txt", rsrc,
+	    sizeof(rsrc)));
 	CHECK("data mtime unchanged by fork write",
 	    stat("mpt/a.txt", &st) == 0 && st.st_mtime == 1700000000);
 
@@ -226,6 +260,8 @@ test_forks(void)
 	    == 0 && m.rsrc_len == sizeof(rsrc) &&
 	    memcmp(m.finfo, "APPLTEST", 8) == 0 &&
 	    m.sidecar_mtime == 1650000000);
+	CHECK("fork contents kept", fork_same("mpt/a.txt", rsrc,
+	    sizeof(rsrc)));
 	CHECK("temp file gone", access("mpt/.a.txt.XXXX", F_OK) == -1);
 	CHECK("ntb_clear", ntb_clear(AT_FDCWD, "mpt/a.txt") == 0 &&
 	    ntb_get(AT_FDCWD, "mpt/a.txt", &m) == 0 && m.rsrc_len == 0);

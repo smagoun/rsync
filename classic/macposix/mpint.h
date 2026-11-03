@@ -30,6 +30,9 @@ void	mp_trace(const char *, ...);
 /* Set errno from an OSErr and return -1 (or the OSErr if 0 -> 0). */
 int	mp_oserr(OSErr);
 
+/* Flush and close a resource fork we wrote (fd.c explains why). */
+OSErr	mp_rf_close(short);
+
 /* ---- resolved paths -------------------------------------------------- */
 
 struct mp_node {

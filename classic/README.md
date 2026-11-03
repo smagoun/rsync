@@ -58,6 +58,23 @@ rsync -av --delete dir/ rsync://192.168.1.20/incoming/dir/
 * **From Linux**, a netatalk tree's `._name` files are enough; no option is needed.
 * **Verified in QEMU:** pushes from rsync 3.2.7 and openrsync, `-E` pushes from the Linux build (which now also sends Apple's format), updates, `--delete` and a no-op run.
 
+### Mac to Mac, and sending from the Mac
+
+When the Mac sends (a push from the Mac, or anyone pulling from the Mac's server), each file with a resource fork or Finder info goes out as `name` plus a `._name` AppleDouble sidecar, the same format netatalk uses. So:
+* **Another Mac** running this port unpacks the sidecars into real forks.
+* **A Linux netatalk share** gets them in the layout netatalk uses.
+* **With `-E`,** the Mac also adds Apple's marker byte to each entry, so macOS's `rsync -E` unpacks them itself.
+
+Tested in QEMU between the Mac OS 8.1 and System 7.1 VMs, in both directions (`classic/emu/try-mac2mac.sh`):
+* **What was copied:** pushes and pulls of a tree with resource forks, fork-only files, type/creator, MacRoman and 31-character names, and nested folders.
+* **Repeat runs** sent nothing.
+* **A changed fork** re-sent only that file.
+
+**System 7.1 stamps resource forks.** Whenever any program writes a resource fork through the File Manager, System 7.1 stores a record of its own in bytes 48–125 of the fork: the file's name, a date and the fork lengths.
+* That area is reserved for the system, so resource files work exactly as before.
+* A copy written on 7.1 differs from its source only in those bytes.
+* Mac OS 8.1 does the same, but rsync avoids it there by flushing each fork before closing it, so 8.1 copies are byte-for-byte identical.
+
 ### Server setup (Linux + netatalk 4)
 
 Run a stock rsync daemon on the netatalk volume, with a module like this in `rsyncd.conf`:

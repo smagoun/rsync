@@ -308,6 +308,29 @@ mp_close(int fd)
 	return err == noErr ? 0 : mp_oserr(err);
 }
 
+/*
+ * Close a resource fork we wrote.  When a written resource fork is flushed
+ * or closed, Mac OS stores a record (the file's name, a date and the fork
+ * lengths) in bytes 48-125 of it, the area the Resource Manager reserves
+ * for the system.  Resource files don't mind, but rsync's copy then
+ * differs from the source.  On Mac OS 8.1, flushing before closing leaves
+ * the fork exactly as written; System 7.1 writes the record on the flush
+ * too, and there it can't be avoided.
+ */
+OSErr
+mp_rf_close(short ref)
+{
+	ParamBlockRec pb;
+	OSErr err;
+
+	memset(&pb, 0, sizeof(pb));
+	pb.ioParam.ioRefNum = ref;
+	err = PBFlushFileSync(&pb);
+	if (FSClose(ref) != noErr && err == noErr)
+		err = ioErr;
+	return err;
+}
+
 /* ---- read/write ------------------------------------------------------ */
 
 ssize_t

@@ -870,7 +870,7 @@ io_write_int(struct sess *sess, int fd, int32_t val)
 int
 io_write_ushort(struct sess *sess, int fd, uint32_t val)
 {
-	uint16_t oval = val;
+	uint16_t oval = htole16((uint16_t)val);
 
 	return io_write_buf(sess, fd, &oval, sizeof(oval));
 }
@@ -923,7 +923,7 @@ io_lowbuffer_buf(struct sess *sess, void *buf,
 
 	assert(*bufpos + valsz + sizeof(int32_t) <= buflen);
 	assert(valsz == (valsz & 0xFFFFFF));
-	tagbuf = htole32((7 << 24) + valsz);
+	tagbuf = (7 << 24) + valsz;	/* io_buffer_int() makes it LE */
 
 	io_buffer_int(buf, bufpos, buflen, tagbuf);
 	io_buffer_buf(buf, bufpos, buflen, val, valsz);
@@ -945,7 +945,7 @@ io_lowbuffer_vstring(struct sess *sess, void *buf, size_t *bufpos,
 
 	assert(*bufpos + sz + sizeof(int32_t) <= buflen);
 	assert(sz == (sz & 0xFFFFFF));
-	tagbuf = htole32((7 << 24) + sz + (sz > 0x7f ? 2 : 1));
+	tagbuf = (7 << 24) + sz + (sz > 0x7f ? 2 : 1);	/* LE below */
 
 	io_buffer_int(buf, bufpos, buflen, tagbuf);
 	io_buffer_vstring(buf, bufpos, buflen, str, sz);
@@ -1029,7 +1029,7 @@ void
 io_lowbuffer_short(struct sess *sess, void *buf,
 	size_t *bufpos, size_t buflen, int32_t val)
 {
-	int16_t	nv = htole32((int16_t)val);
+	int16_t	nv = htole16((int16_t)val);
 
 	io_lowbuffer_buf(sess, buf, bufpos, buflen, &nv, sizeof(nv));
 }
